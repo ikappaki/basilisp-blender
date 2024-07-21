@@ -1,0 +1,39 @@
+# adapted from https://github.com/anze3db/words-tui/blob/main/.github/workflows/publish.yml
+name: Publish to PyPI
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+
+    runs-on: ubuntu-latest
+
+    environment: release
+    permissions:
+      id-token: write # IMPORTANT: this permission is mandatory for trusted publishing
+      contents: write # github release upload
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+        cache: 'pip'
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install poetry
+    - name: Build package
+      run: poetry build
+    - name: Upload release artifacts
+      run: gh release upload ${{ github.event.release.tag_name }} dist/*.{tar.gz,whl}
+      env:
+        GH_TOKEN: ${{ github.token }}
+    - name: Publish package distributions to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1

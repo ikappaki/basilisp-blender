@@ -1,0 +1,78 @@
+name: Run tests
+
+on:
+  pull_request:
+    types: [ opened, synchronize, reopened ]
+  push:
+    branches: [ main ]
+
+concurrency:
+  group: ${{ github.ref }}-${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  run-tests:
+    runs-on: ${{matrix.os}}
+    env:
+      BB_BLENDER_TEST_HOME: "~/blender"
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        version: ['3.11']
+        blender: ['4.2.0']
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.version }}
+
+      - name: Install poetry
+        uses: abatilo/actions-poetry@v2
+
+      - name: Setup a local virtual environment
+        run: |
+          poetry config virtualenvs.create true --local
+          poetry config virtualenvs.in-project true --local
+      - uses: actions/cache@v3
+        name: Define a cache for the virtual environment based on the dependencies lock file
+        with:
+          path: ./.venv
+          key: venv-${{ runner.os }}-${{ matrix.version }}-${{ hashFiles('poetry.lock') }}
+
+      - name: Install the project dependencies
+        run: poetry install
+
+      - name: Run tests
+        run: poetry run pytest -v
+
+      - name: Restore Blender from cache
+        id: cache-blender
+        uses: actions/cache/restore@v3
+        with:
+          path: ~/blender
+          key: ${{ runner.os }}-blender-${{ matrix.blender }}
+
+      - name: Install Blender
+        if: steps.cache-blender.outputs.cache-hit != 'true'
+        run: |
+          poetry run python scripts/blender_install.py ${{ matrix.blender }}
+          
+      - name: "Save Blender in cache"
+        if: steps.cache-blender.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v3
+        with:
+          path: ~/blender
+          key: ${{ steps.cache-blender.outputs.cache-primary-key }}
+
+      - name: Install EGL mesa
+        if: "startsWith (matrix.os, 'ubuntu')"
+        run: |
+          sudo apt-get update -y -qq
+          sudo apt-get install -y -qq libegl1-mesa libegl1-mesa-dev
+
+      - name: Run integration tests
+        run: |
+          poetry build
+          poetry run python scripts/bb_package_install.py
+          poetry run pytest -m integration -v
