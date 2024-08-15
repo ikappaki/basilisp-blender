@@ -8,14 +8,17 @@
   - Client requests can be collected into a map for asynchronous
   processing outside the current execution thread."
   (:require [basilisp.contrib.bencode :as bc]
-            [basilisp.string :as str])
-  (:import logging
+            [basilisp.string :as str]
+            [basilisp-blender.utils :as u])
+  (:import contextlib
+           logging
+           os.path
            queue
+           socket
            socketserver
            sys
            threading
-           traceback
-           uuid))
+           traceback))
 
 (def logger
   "The logger for this namespace."
@@ -30,7 +33,7 @@
 (defmacro ^:private warn [& values]
   `(when (.isEnabledFor logger logging/WARNING)
      (.warning logger (str/join " " [~@values]))))
-(defmacro error [& values]
+(defmacro ^:private err [& values]
   `(.error logger (str/join " " [~@values])))
 
 (definterface ^:private IStdOut
@@ -354,24 +357,44 @@
     (try
       (.sendall socket (bc/encode response))
       (catch python/TypeError e
-        (error :bencode-cannot-decode (pr-str e))))))
+        (err :bencode-cannot-decode (pr-str e))))))
 
 (defn- make-reponse-handler [socket]
   (-> (make-send-fn socket)
       log-response-mw
       response-for-mw))
 
+(defn- work*-make
+  "Create and return an atom for a work* registry map to store the
+  connected clients and their requests."
+  []
+  (atom {}))
+
+(defn- work*-client-add!
+  "Add a new client ``socket`` connection to the ``work*`` map and
+  return the client's requests `queue/Queue` assigned to it."
+  [work* socket]
+  (let [q (queue/Queue)]
+    (swap! work* assoc socket q)
+    q))
+
 (defn- on-connect! [tcp-req-handler opts]
-  "Serve a new nREPL connection as found in ``tcp-req-handler`` according to ``opts``.
+  "Serve a new nREPL connection as found in ``tcp-req-handler``
+   according to ``opts``.
+
+  New client connections begin at the `user` namespace and it binds
+  `*1`, `*2`, `*3` and `*e` to the ultimate, penultimate,
+  antepenultimate evaluation result and last exception message
+  respectively.
 
   ``opts`` is a map of options with the following optional keys.
 
-  :recv-buffer-size The buffer size to using for incoming nREPL
+  :recv-buffer-size The buffer size to use for incoming nREPL
   messages.
 
-  :work* An optional atom containing a map. If provided, client
-  requests are queued in the map under a client information key,
-  rather than being executed imediately."
+  :work* The work registry `atom` created with `work*-make`. If
+  provided, client requests are queued under the client's socket in
+  the registry instead of being executed immediately."
   (let [{:keys [recv-buffer-size work*]
          :or {recv-buffer-size 1024}} opts
         socket                        (.-request tcp-req-handler)
@@ -384,9 +407,7 @@
                                              :*3 nil :*e nil ;; evaluation results
                                              :eval-ns nil ;; the last eval ns
                                              })
-        reqq                          (when work* (queue/Queue))]
-    (when work*
-      (swap! work* assoc client-info reqq))
+        reqq                          (when work* (work*-client-add! work* socket))]
     (try
       (info "Connection accepted" :info client-info)
       ;; Need to load the `clojure.core` alias because cider uses it
@@ -411,57 +432,87 @@
               (let [req-do #(try
                               (handler (assoc request :client* client*) response-handler)
                               (catch python/Exception e
-                                (error :request-handler-unexpected-exception (pr-str e))))]
+                                (err :request-handler-unexpected-exception (pr-str e))))]
                 (if reqq
                   (.put reqq req-do)
                   (req-do))))
             (recur (.recv socket recv-buffer-size)))))
       (catch python/Exception e
-        (error :client-connection-error :client client-info :exception e)
-        (error (traceback/format-exc))))))
+        (when socket (.close socket))
+        (err :client-connection-error :client client-info :exception e)
+        (err (traceback/format-exc))))))
 
-(defn clients-work-do!
-  "Execute all client requests contained in the `work*` atom and call
-   the optional `notify-fn` with the client information and the
-   request to be executed.
+(defn- clients-work-do!
+  "Execute all client requests contained in ``work*``.
 
-   `work*` is an atom containing a map where each key represents a
-  client information object, and each value is a `queue.Queue` of
-  request functions to be executed.
+   ``work*`` is an atom containing a map where each key is a client's
+  socket object, and each value is a `queue.Queue` of client request
+  functions to be executed.
 
-  The optional `notify-fn` argument is a 2-arity function that will be
-  called with the client information and the request that is about to
-  be executed."
-  ([work*]
-   (clients-work-do! work* nil))
-  ([work* notify-fn]
-   (let [work @work*]
-     (doseq [[client-info reqq] work]
-       (while (not (.empty reqq))
-         (debug ":async-work-req-do" :client client-info :qsize (.qsize reqq))
-         (let [req (.get reqq)]
-           (when notify-fn (notify-fn client-info req))
-           (req)
-           (debug ":async-work-req-done")))))))
+  It returns a map with the following key on error
+
+  :error Contains the details of the error."
+  [work*]
+  (u/with-eprotect {:id :nrepl-clients-work-do-error :on-err-str #(err %)}
+    (let [work @work*]
+      (doseq [[client reqq] work]
+        (while (not (.empty reqq))
+          (u/with-eprotect {:id [:nrepl-clients-work-do-error :client client]
+                            :on-err-str #(err %)}
+            (debug ":async-work-req-do" :client client :qsize (.qsize reqq))
+            (let [req (.get reqq)]
+              (req)
+              (debug ":async-work-req-done"))))))))
+
+(defn server-shutdown!
+  "Shut down the `server` and close any open client connections in the
+  `work*` atom if present.
+
+  It returns a map with the following key on error
+
+  :error Contains the details of the error."
+  [server work*]
+  (info :server-shutting-down)
+  (u/with-eprotect {:id :server-shutdown!-error :on-err-str #(err %)}
+    (.shutdown server)
+    (when work*
+      (doseq [[socket work_] @work*]
+        (when-not (= (.fileno socket) -1)
+          (info :closing (py->lisp (.getsockname socket)))
+          (.shutdown socket socket/SHUT_RDWR)
+          (.close socket))))
+    (.server-close server)))
 
 (defn server-make
-  "Create and return a `socketserver/TCPServer` serving nREPL clients
+  "Create a `socketserver/TCPServer` serving nREPL clients
   according to ``opts`` at 127.0.0.1 at a random available port.
+
+  New client connections are handled by `on-connect`, of which see.
 
   See `ops` for the operation supported by the server.
 
-  The nREPL starts at the `user` namespace and binds `*1`, `*2`, `*3`
-  and `*e` to the ultimate, penultimate, antepenultimate evaluation
-  result and last exception message respectively.
-
   ``opts`` is a map of options with the following optional keys
+
+  :async? If truthy, `on-connect` `on-connect` queues client requests
+  in a `work*` registry instead of executing them immediately.
 
   :host The host address to bind to, defaults to 127.0.0.1.
 
   :port The port number to listen to, defaults to 0 which means to
   pickup a random available port.
 
-  See :lpy:fn:`on-connect!` for additionally supported ``opts`` keys.
+  It returns a map with the following keys
+
+  :error Contains details of any error during server creation.
+
+  :server The `socketserver/ThreadingTCPServer` server object.
+
+  :shutdown-fn A function to gracefully shut down the server.
+
+  :work-fn If :async? is truthy, this is the function to process
+  pending client `work*`.
+
+  See `on-connect!` for additionally supported ``opts`` keys.
 
   Known limitations:
 
@@ -472,114 +523,129 @@
   2. The session uuids are ignored and only created to satisfy the
   initial clone op."
   [opts]
-  (let [{:keys [host port] :or {host "127.0.0.1" port 0}} opts
-        handler (python/type (name (gensym "nREPLTCPHandler")) (python/tuple [socketserver/StreamRequestHandler])
-                             #py {"handle" #(on-connect! % opts)})]
-    (socketserver/ThreadingTCPServer (python/tuple [host port]) handler)))
-
-(defn server-shutdown!
-  "Shutdown the `server`."
-  [server]
-  (info ":server-shutting-down")
-  (.shutdown server)
-  (info ":server-closing")
-  (.server-close server)
-  (info ":server-closed"))
+  (u/with-eprotect :server-make-error
+    (let [{:keys [async? host port] :or {host "127.0.0.1" port 0}} opts
+          work* (when async? (work*-make))
+          opts (cond-> opts
+                 async?
+                 (assoc :work* work*))
+          handler (python/type (name (gensym "nREPLTCPHandler")) (python/tuple [socketserver/StreamRequestHandler])
+                               #py {"handle" #(on-connect! % opts)})
+          server (socketserver/ThreadingTCPServer (python/tuple [host port]) handler)]
+      (set! (.-daemon-threads server) true)
+      (cond-> {:server server
+               :shutdown-fn #(server-shutdown! server work*)}
+        async?
+        (assoc :work-fn #(clients-work-do! work*))))))
 
 (def ^:private nrepl-server-signature
   "The de facto signature nrepl started message that is used by IDEs to
   identify the host and port number the server is running on."
   "nREPL server started on port %s on host %s - nrepl://%s:%s")
 
+(defn- server-serve!
+  "Blocking call to serve `server` requests, with graceful error
+  handling.
+
+  It returns a map with the following key on error
+
+  :error Contains the details of the error."
+  [server]
+  (try
+    (.serve-forever server)
+    (catch python/KeyboardInterrupt _e
+      (println "Exiting in response to a keyboard interrupt..."))
+    (catch python/Exception e
+      (let [error (u/error-make :nrepl-server-server-error e)]
+        (err (u/error->str error))
+        {:error error}))))
+
 (defn start-server!
-  "Create an nREPL server with :lpy:fn:`server-make` (of which see)
-  according to ``opts`` if given, and serve clients for ever.
+  "Create an nREPL server with `server-make` (of which see) according to
+  ``opts`` if given, and blocks for serving clients.
 
   It prints out the `nrepl-server-signature` message at startup for
   IDEs to pickup the host number to connect to.
 
   ``opts`` is a map of options with the following optional keys
 
+  :async? If truthy, runs the server non-blocking in a separate thread
+  where requests are queued instead of executed immediately. Returns a
+  map with
 
-  :async? If true, runs the server in asynchronous where requests are
-  queued rather than executed immediately. This mode requires that
-  the :server* key is present in the ``opts``
-  map. The :server*'s :work-fn key will be set to a function that
-  processes all pending work (see :atoms* below).
+           :error :error Contains details of any error during server
+           creation.
 
-  :nrepl-port-file An option filepath to write the port number
-  to. This is typically set to .nrepl-port for the editors to pick up.
+           :host The host interface the server is bound to.
 
-  :server* A map atom. The map may contains an optional :start-event
-  key with a `threading.Event` value. This event is set when the
-  server is about to enter its main loop. The map will be populated
-  with the following keys
+           :port The local port the server is listening on.
 
-           :server Set to the server reference.
+           :shutdown-fn The function to shutdown the server.
 
-           :work-fn When in `async?` mode, set to a function that executes all pending work.
+           :work-fn The function to process any pending client
+           requests.
 
-           :shutdown-fn set to a function that can be called to shut down the server.
+  :nrepl-port-file An optional filepath to write the port number
+  to. Typically set to .nrepl-port for the editors to detect.
 
-  also see :lpy:fn:`server-make` for additionally supported
-  ``opts`` keys."
+  :server* An optional promise of a map delivered on success with
+
+           :host The host interface the server is bound to.
+
+           :port The local port the server is listening on.
+
+           :shutdown-fn The function to shutdown the server.
+
+  also see `server-make` for additionally supported ``opts`` keys."
   ([]
    (start-server! {}))
   ([opts]
-   (let [{:keys [nrepl-port-file  async? server*]
+   (let [{:keys [nrepl-port-file  async? server*] :as k
           :or   {nrepl-port-file ".nrepl-port"}} opts
-         work*                                   (when async? (atom {}))
-         server                                  (server-make (assoc opts :work* work*))
-         {:keys [start-event]}                   @server*]
-     (if (and async? (not server*))
-       (error "Error: async server requires the server* option.")
+         port-file-path (when nrepl-port-file
+                          (try (os.path/abspath nrepl-port-file)
+                               (catch python/Exception _
+                                 nil)))]
+     (u/with-eprotect :start-server-error :on-err-str #(err %)
+       (with [port-file (if port-file-path
+                          (python/open port-file-path "w")
+                          (contextlib/nullcontext))]
+             (let [{:keys [error server shutdown-fn work-fn]} (server-make opts)]
+               (if error
+                 {:error error}
 
-       (try
-         (when server* (reset! server* (cond-> {:server server
-                                                :start-event start-event
-                                                :shutdown-fn #(server-shutdown! server)}
-                                         async?
-                                         (assoc :work-fn (partial clients-work-do! work*)))))
-         (let [[host port] (py->lisp (.-server-address server))]
-           (binding [*out* sys/stdout]
-             (println (format nrepl-server-signature port host host port)))
-           (spit nrepl-port-file (str port)))
-         (when start-event (.set start-event))
-         (.serve-forever server)
-         (catch python/KeyboardInterrupt _e
-           (println "Exiting in response to a keyboard interrupt..."))
-         (catch python/Exception e
-           (error :nrepl-server-error e)
-           (error (traceback/format-exc))))))))
+                 (let [[host port] (py->lisp (.-server-address server))
+                       port-file-path (when port-file-path
+                                        (try
+                                          (.write port-file (str port))
+                                          (.flush port-file)
+                                          port-file-path
+                                          (catch Exception e
+                                            (warn :nrepl-start-error :can-t-write-to-port-file-at nrepl-port-file e)
+                                            nil)))]
+                   (binding [*out* sys/stdout]
+                     (println (format nrepl-server-signature port host host port)))
 
+                   (if async?
+                     ;; the server thread has to be a
+                     ;; `threading/Thread`, not a `future`, for the
+                     ;; application not to hang on exit.
+                     (let [server-thread (threading/Thread
+                                          **
+                                          :daemon true
+                                          :target #(u/with-eprotect :nrepl-server-async-fut
+                                                     (server-serve! server)))]
+                       (.start server-thread)
+                       (cond-> {:host host
+                                :port port
+                                :server-thread_ server-thread
+                                :shutdown-fn shutdown-fn
+                                :work-fn work-fn}
+                         nrepl-port-file
+                         (assoc :nrepl-port-file port-file-path)))
 
-(defn server-thread-async-start!
-  "Start an server process in a daemon thread, where client requests are
-  queued for differed execution by a work function, rather than
-  executed immediately.
-
-  ``opts`` support the same keys as lpy:fn:``start-server!`` (of which
-  see), except for the :async?, :server* and :start-events keys, which
-  will be overwriten during execution.
-
-  On success, returns a map of
-
-  :server The server reference.
-
-  :server-thread The server thread.
-
-  :shutdown-fn The function to call to shut down the server.
-
-  :work-fn The function to call for executing any pending work."
-  [opts]
-  (let [start-event (threading/Event)
-        server* (atom {:start-event start-event})
-        opts (assoc opts :async? true :server* server*)
-        start-fn #(start-server! opts)
-        thread (threading/Thread ** :target start-fn :daemon true)]
-    (.start thread)
-    (if (.wait start-event 10)
-      (-> (select-keys @server* [:server :work-fn :shutdown-fn])
-          (assoc :server-thread thread))
-
-      (error :server-thread-async-start :could-not-start))))
+                     (do
+                       (when server* (deliver server* {:host host
+                                                       :port port
+                                                       :shutdown-fn shutdown-fn}))
+                       (server-serve! server)))))))))))

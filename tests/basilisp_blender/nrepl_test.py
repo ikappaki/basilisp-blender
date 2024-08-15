@@ -76,7 +76,8 @@ def test_server_thread_async_start(tmpdir):
         work_thread.join(timeout=5)
         assert not work_thread.is_alive()
     finally:
-        shutdownfn()
+        if shutdownfn:
+            shutdownfn()
 
         if work_stop_event:
             work_stop_event.set()

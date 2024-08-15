@@ -1,0 +1,280 @@
+(ns basilisp-blender.control-panel
+  (:require [clojure.string :as str]
+            [basilisp-blender.bpy-utils :as bu]
+            [basilisp-blender.utils :as u])
+  (:import bpy
+           os.path
+           sys))
+
+(defn- class-register!
+  "Helper function to register a bpy class, with prior unregistering if
+  possible."
+  [class]
+  (try
+    (.unregister-class bpy/utils class)
+    (catch Exception e
+      nil))
+  (.register-class bpy/utils class))
+
+(defn- nrepl-url
+  [host port]
+  (str "nrepl://" host
+       ":" (if (= port 0)
+             "<random>"
+             port)))
+
+(defn- nrepl-settings-property-group-class-make
+  "Defines property group class that will store the nREPL server
+  settings."
+  []
+  (u/class-make* NREPLSettingsPropertyGroup [bpy.types/PropertyGroup]
+                 [^{:tag (.StringProperty bpy/props **
+                                          :name "host"
+                                          :description "The local interface address to listen on for connections"
+                                          :default "127.0.0.1")}
+                  pr-host
+
+                  ^{:tag (.IntProperty bpy/props **
+                                       :name "port"
+                                       :description "The port number to listen for connections. Set to 0 to use a random available port on startup"
+                                       :default 0
+                                       :min 0)}
+                  pr-port
+
+                  ^{:tag (.StringProperty bpy/props **
+                                          :name ".nrepl-port dir"
+                                          :description "An optional directory path to save the .nrepl-port file for editors to use when connecting to the server. If not provided, it defaults to the current working directory")}
+                  pr-port-dir]))
+
+(defn- ctrl-make
+  "Returns a new stateful nREPL control instance in the `:ready` state.
+
+  The control object can be in one of the following states
+
+  :ready The initial state, ready to start the nREPL server.
+
+  :serving The nREPL server is started."
+  []
+  (atom {:status [:ready]}))
+
+(defn ctrl-do!
+  "Executes `cmd` on `ctrl*` with optional options `opts` map argument,
+  and returns a result map.
+
+  Supported `cmd`s are:
+
+  :info-get Returns a map of
+
+    :host The host address the server is listening to.
+
+    :port The port the server is bound to.
+
+    :port-dir The directory where the `.nrepl-port` file was saved at.
+
+    :status The status of the `ctrl*`.
+
+  :server-toggle! If the server status is `:ready`, it starts
+  according to `opts` and sets the status to `:serving`. If the server
+  status is `:serving` it stops it and resets it to `:ready`. It
+  returns `[:stared|:stopped \"nrepl:<address>:<port>\"]`
+  accordingly. The starting `opts` can be
+
+    :host The local interface address the server should listen to.
+
+    :nrepl-port-dir The directory path where the server should write
+  the `.nrepl-port` file with the port number. If not given, the
+  current working directory path is used.
+
+    :port The port number the server should bound to. A zero
+  number (the default) indicates the server should bound to a random
+  available port number.
+
+  The result map can have the following keys
+
+  :error On error, a msg of what went wrong.
+
+  :result On success, the `cmd`'s result."
+  ([ctrl* cmd]
+   (ctrl-do! ctrl* cmd nil))
+  ([ctrl* cmd opts]
+   (let [{:keys [host port port-dir shut-fn status] :as ctrl} @ctrl*
+         [ctrl-new {:keys [error result] :as ret}]
+         (do
+           ;; (println :ctrl-do!/top :ctrl ctrl)
+           (cond
+             (= cmd :info-get)
+             [ctrl {:result {:port port :host host :port-dir port-dir :status status}}]
+
+             (= cmd :server-toggle!)
+             (condp = status
+               [:ready]
+               (let [{:keys [nrepl-port-dir]
+                      opts-host :host opts-port :port} opts
+                     nrepl-port-dir (when nrepl-port-dir
+                                      (let [pf (str/trim nrepl-port-dir)]
+                                        (when-not (empty? pf)
+                                          pf)))]
+                 ;; (println :ctrl-do/server-toggle! :starting :opts opts)
+                 (let [{:keys [error host nrepl-port-file port server shutdown!] :as server_}
+                       (bu/nrepl-server-start (cond-> {:host opts-host :port opts-port}
+                                                nrepl-port-dir
+                                                (assoc :nrepl-port-dir nrepl-port-dir)))]
+                   ;; (println :ctrl-do!/server-toggle! :server server_)
+                   (if error
+                     [ctrl {:error error}]
+
+                     (do
+                       ;; (println :ctrl-do!/server-toggle! :started :port port :shut-fn shut-fn)
+                       [(cond-> {:status [:serving]
+                                 :shut-fn shutdown!
+                                 :host host
+                                 :port port}
+                          nrepl-port-file
+                          (assoc :port-dir (os.path/dirname nrepl-port-file)))
+
+                        {:result [:started (nrepl-url host port)]}]))))
+
+               [:serving]
+               (do
+                 (shut-fn)
+                 [{:status [:ready]}
+
+                  {:result [:stopped (nrepl-url host port)]}])
+
+               ;; else
+               [{:status [:ready]}
+                {:error (u/error-make :state-invalid status
+                                      :ctrl ctrl)}])
+
+             :else
+             [ctrl {:error [:unknown-command cmd]}]))]
+     (reset! ctrl* ctrl-new)
+     ;; (println :ctrl-do!/bottom ctrl-new)
+
+     ret)))
+
+(defn- nrepl-control-operator-class-make
+  "Defines an Operator class to start/stop the server using `ctrl`."
+  [ctrl]
+  (u/class-make* NREPLControlOperator [bpy.types/Operator]
+                 [^{:default "object.nrepl_server_operator"}  bl-idname
+                  ^{:default "Start Server"}                  bl-label
+                  ^{:default "nREPl server control"}          bl-description]
+
+                 (execute
+                  "Toggles the nrepl server using the `context`
+                  scene's nrepl user settings as starting options."
+                  [context]
+                  (binding [*out* sys/stdout]
+                    (let [props (.. context -scene -nrepl-settings-user)
+                          pr-host (.-pr-host props)
+                          pr-port (.-pr-port props)
+                          pr-port-dir (let [pf (str/trim (.-pr-port-dir props))]
+                                        (when-not (empty? pf)
+                                          pf))
+                          {:keys [error result]}
+                          (ctrl-do! ctrl :server-toggle! {:host pr-host
+                                                          :port pr-port
+                                                          :nrepl-port-dir pr-port-dir})]
+                      (if error
+                        (.report self #py #{"ERROR"}
+                                 (str :server-op-error " " (u/error->str error)))
+
+                        (.report self #py #{"INFO"}
+                                 (str result)))))
+                  #py #{"FINISHED"})))
+
+(defn- nrepl-control-panel-class-make
+  "Defines a control panel class to start/stop the nREPL server and
+  configure its options, with the running options taken from the
+  `ctrl`.
+
+  Once registered, the class appears in the Properties window output."
+  [ctrl]
+  (u/class-make* NREPLControlPanel [bpy.types/Panel]
+                 [^{:default "PROPERTIES_EDITOR_PT_nREPL_server"} bl-idname
+                  ^{:default "Basilisp nREPL server"}             bl-label
+                  ^{:default "PROPERTIES"}                        bl-space-type
+                  ^{:default "WINDOW"}                            bl-region-type
+                  ^{:default "output"}                            bl-context]
+
+
+                 (draw
+                  "Draws the control panel to to toggle the server and
+                   manage its settings.
+
+                   - The server toggles via the bpy object's nREPL
+                     server operator.
+
+                   - User settings are saved in the `context` scene's
+                     nREPL settings property group.
+
+                   - Running server details are taken from the
+                     `ctrl`."
+                  [context]
+
+                  (binding [*out* sys/stdout]
+                    (let [{:keys [host port port-dir status] :as _info}
+                          (:result (ctrl-do! ctrl :info-get nil))
+
+                          layout (.-layout self)
+                          props (.. context -scene -nrepl-settings-user)
+                          pr-port (.-pr_port props)]
+                      (case status
+                        [:ready]
+                        (do
+                          (let [row (.row layout)]
+                            (.operator row "object.nrepl_server_operator" **
+                                       :text "🚀 START SERVER"))
+                          (set! (.. layout -use-property-split) true)
+                          (set! (.. layout -use-property-decorate) false)
+
+                          (let [[row1 row2 row3] (repeatedly 3 #(.row layout))]
+                            (.prop row1 props "pr_host")
+                            (.prop row2 props "pr_port")
+                            (.prop row3 props "pr_port_dir")))
+                        [:serving]
+                        (do
+                          (let [row (.row layout)]
+                            (.operator row "object.nrepl_server_operator" **
+                                       :text "✋ STOP SERVER"))
+                          (doseq [[k v] [["host" host]
+                                         ["port" (str port)]
+                                         [".nrepl-port dir" port-dir]]]
+                            (let [split (.split layout ** :factor 0.4)
+                                  col1 (.column split ** :align true)
+                                  col2 (.column split)]
+                              (set! (.-alignment col1) "RIGHT")
+                              (.label col1 ** :text k)
+                              (when v
+                                (.label col2 ** :text v)))))))))))
+
+(defn nrepl-control-panel-create!
+  "Creates the nrepl server control panel in Blender, and returns its
+  control interface.
+
+  The user settings are stored in the Scene as Properties."
+  []
+  (let [ctrl (ctrl-make)
+        settings-user
+        (nrepl-settings-property-group-class-make)
+
+        operator
+        (nrepl-control-operator-class-make ctrl)
+
+        panel
+        (nrepl-control-panel-class-make ctrl)]
+
+
+    (class-register! settings-user)
+    (set! bpy.types.Scene/nrepl-settings-user (.PointerProperty bpy/props ** :type settings-user))
+    (class-register! operator)
+    (class-register! panel)
+
+    ctrl))
+
+(comment
+  (def ctrl2 (nrepl-control-panel-create))
+  @ctrl2
+;;
+  )

@@ -28,9 +28,10 @@ def server_thread_async_start(host="127.0.0.1", port=0, nrepl_port_filepath=None
     assert port >= 0
 
     nrepl_server_mod = importlib.import_module(munge("basilisp-blender.nrepl-server"))
-    ret = nrepl_server_mod.server_thread_async_start__BANG__(
+    ret = nrepl_server_mod.start_server__BANG__(
         lmap.map(
             {
+                kw.keyword("async?"): True,
                 kw.keyword("host"): host,
                 kw.keyword("port"): port,
                 kw.keyword("nrepl-port-file"): nrepl_port_filepath,

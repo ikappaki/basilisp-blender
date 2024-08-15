@@ -1,0 +1,407 @@
+(ns tests.basilisp-blender.integration.test-utils
+  (:import logging
+           os
+           pathlib
+           socket
+           tempfile
+           time
+           tests.basilisp_blender.integration.integ_utils)
+  (:require [basilisp.contrib.bencode :as bc]
+            [basilisp.edn :as edn]
+            [basilisp.string :as str]
+            [basilisp.test :refer [deftest are is testing]]
+            [basilisp-pprint.pprint :as pp]))
+
+
+(def logger
+  "The logger for this namespace."
+  (logging/getLogger (namespace ::)))
+
+(defmacro debug [& values]
+  `(when (.isEnabledFor logger logging/DEBUG)
+    (.debug logger (str/join " " [~@values]))))
+(defmacro info [& values]
+  `(when (.isEnabledFor logger logging/INFO)
+    (.info logger (str/join " " [~@values]))))
+(defmacro warn [& values]
+  `(when (.isEnabledFor logger logging/WARNING)
+     (.warning logger (str/join " " [~@values]))))
+(defmacro err [& values]
+  `(.error logger (str/join " " [~@values])))
+
+(defn- logging-enable! [level]
+  (let [handler (logging/StreamHandler)]
+    (.setLevel handler level)
+    (.addHandler logger handler))
+  (.setLevel logger level))
+
+#_(logging-enable! logging/DEBUG)
+#_(logging-enable! logging/ERROR)
+
+(defn pp-code [code]
+  (pp/with-pprint-dispatch
+    pp/code-dispatch
+    (pp/pprint code)))
+
+
+(defn requires-imports-split [sexp-list]
+  "Splits ``sexp-list`` at the end of top-level `require`s and `import`s.
+   Returns [requires-and-imports rest-of-expressions]."
+  (split-with (fn [sexp]
+                (and (coll? sexp) (some #{(first sexp)} #{'require 'import 'defmacro
+                                                          'basilisp.core/require
+                                                          'basilisp.core/import
+                                                          'basilisp.core/defmacro}) ))
+              sexp-list))
+
+(deftest test-requires-imports-split
+  (let [input '[(require '[foo.bar :as fb])
+                (import '[path :as p])
+                (defn my-func [x] (+ x 1))
+                (println "Hello")]
+        [imports rest] (requires-imports-split input)]
+
+    (testing "Correct splitting"
+      (is (= '((require '[foo.bar :as fb])
+               (import '[path :as p]))
+             imports))
+      (is (= '((defn my-func [x] (+ x 1))
+               (println "Hello"))
+             rest)))
+
+    (testing "No imports"
+      (is (= ['() '((defn foo []) (+ 1 2))] (requires-imports-split '((defn foo []) (+ 1 2))))))
+
+    (testing "Only imports"
+      (is (= ['((require '[foo]) (import '[bar])) '()]
+             (requires-imports-split '((require '[foo]) (import '[bar]))))))
+
+    (testing "Mixed order"
+      (let [mixed '[(require '[a]) (defn b []) (import '[c])]
+            [imp rst] (requires-imports-split mixed)]
+        (is (= 1 (count imp)))
+        (is (= 2 (count rst)))))))
+
+#_(pp/pprint (test-requires-imports-split))
+
+(def platform-tests-ui-support?
+  "Returns whether UI tests are supported on the current platform."
+  (let [unsupported? (when-let [gha-runner-os (os/getenv "RUNNER_OS")]
+                       (not= gha-runner-os "Linux"))]
+    (not unsupported?)))
+
+(defmacro deftest-ui [& body]
+  "Like `basilisp.test/deftest`, but skips test definition with a
+  message if the platform lacks UI support."
+  (if platform-tests-ui-support?
+    `(deftest ~@body)
+    `(println ::skipping ~(str (first body)))))
+
+(defn sexps-capture-wrap [sexps]
+  "Wraps the ``sexps`` in a form that captures its *out* and *err*
+  streams and return value.
+
+  Returns a map with the following keys, which is EDN encoded as a string.
+
+  :error   An unexpected error occurred.
+
+  :errstr  The contents of the captured `*err*` stream.
+
+  :exc     If the ``sexps`` threw an exception, the exception message.
+
+  :outstr  The contents of the captured ``*out*`` stream.
+
+  :res The return value of ``sexps``. It does a postwalk on the
+  collection and converts any values that are not a string, number,
+  keyword or nil to [:type-of <type of value> (str value)], so that
+  the result is guaranteed to be EDN encodeable."
+  (let [[requires-imports sexps] (requires-imports-split sexps)
+        sexps `((require '~'[basilisp.edn :as edn]
+                         '~'[basilisp.walk :as w])
+                (import ~'io)
+                ~@requires-imports
+                (let [sout# (~'io/StringIO)
+                      serr# (~'io/StringIO)
+                      [res# exc#] (binding [*out* sout#
+                                            *err* serr#]
+                                    (try
+                                      [(do ~@sexps)]
+                                      (catch python/Exception e#
+                                        [nil e#])))
+                      strout# (~'.getvalue sout#)
+                      strerr# (~'.getvalue serr#)
+                      ;; this should make the whole result round trip
+                      ;; edn/write/read string.
+                      res# (w/postwalk (fn [x] (if (or (coll? x) (string? x) (number? x) (keyword? x)
+                                                       (nil? x))
+                                                 x
+                                                 [:type-of (str (type x)) (str x)]))
+                                       res#)
+                      ;; this shouldn't error because of the walk
+                      ;; above.
+                      err# (when (= :error (try (~'edn/read-string (~'edn/write-string res#))
+                                                (catch python/Exception _# :error)))
+                             [:sexps-capture-wrap-edn-encode-error (str res#)])]
+                  (~'edn/write-string (cond-> {:outstr strout#
+                                               :errstr strerr#}
+                                        exc#
+                                        (assoc :exc (str exc#))
+
+                                        err#
+                                        (assoc :error err#)
+
+                                        (not (or exc# err#))
+                                        (assoc :res res#)))))]
+    sexps))
+
+(deftest test-sexps-capture-wrap
+  (let [test-fn (fn [input]
+                  (do
+                    (eval (concat '(do) (sexps-capture-wrap input)))))
+        read-result #(edn/read-string %)
+        nl os/linesep
+        ps os.path/sep]
+
+    (testing "Basic output capture"
+      (let [result (read-result (test-fn '((println "Hello"))))]
+        (is (= (str "Hello" nl) (:outstr result)))
+        (is (= nil (:res result)))))
+
+    (testing "Error capture"
+      (let [result (read-result (test-fn '((binding [*out* *err*]
+                                                (println "hi")))))]
+        (is (= (str "hi" nl) (:errstr result)))))
+
+    (testing "Exception capture"
+      (let [result (read-result (test-fn '((/ 1 0))))]
+        (is (string? (:exc result)))
+        (is (re-find #"ZeroDivisionError" (:exc result)))))
+
+    (testing "Return value capture"
+      (let [result (read-result (test-fn '((+ 1 2))))]
+        (is (= 3 (:res result)))))
+
+    (testing "Requires and imports"
+      (let [result (read-result (test-fn '((require '[clojure.string :as str])
+                                              (import [os.path :as p])
+                                              (str/upper-case (p/join "hello" "there")))))]
+        (is (= (str "HELLO" ps "THERE") (:res result)))))
+
+    (testing "All toghether"
+      (let [result (read-result (test-fn '((require '[clojure.string :as str])
+                                              (import [os.path :as p])
+                                              (println "out1")
+                                              (binding [*out* *err*]
+                                                (println "err1"))
+                                              (println "out2")
+                                              (str/upper-case (p/join "hello" "there")))))]
+        (is (= {:errstr (str "err1" nl)
+                :outstr (str "out1" nl  "out2" nl)
+                :res (str "HELLO" ps "THERE")} result))))
+
+    (testing "Non-EDN encodable result"
+      (let [result (read-result (test-fn '([1 (python/Exception "an exc")])))]
+        (is (= {:errstr "",
+                :res
+                [1 [:type-of "<class 'Exception'>" "Exception('an exc')"]],
+                :outstr ""}
+               result)))
+
+      (let [result (read-result (test-fn '((symbol "#abc"))))]
+        (is (= {:errstr "",
+                :res [:type-of "<class 'basilisp.lang.symbol.Symbol'>" "#abc"],
+                :outstr ""}
+               result))))))
+
+#_(pp/pprint (test-sexps-capture-wrap))
+
+(defn as-posix [path-str]
+  "Returns the posix file path format representation of ``path-str``."
+  (.as-posix (pathlib/Path path-str)))
+
+(defmacro blender-eval [& body]
+  "Starts Blender and evaluates ``body`` sexps in its python
+interpreter, returning a map with the following keys. Blender is
+terminated after the evaluation is complete.
+
+  :errstr The contents of the captured `*err*` stream.
+
+  :exc If the ``sexps`` threw an exception, the exception message.
+
+  :outstr The contents of the captured ``*out*`` stream.
+
+  :res The return value of the evaluation, unless an exception was
+  thrown."
+  (let [[opts body] (let [opts? (first body)]
+                      (if (map? opts?)
+                        [opts? (rest body)]
+                        [nil body]))
+        opts-default {:terminate? true}
+        {:keys [terminate?]} (merge-with (fn [v1 _] v1) opts opts-default)
+
+        sexps-wrap (sexps-capture-wrap body)
+        [requires-imports sexps-rest] (requires-imports-split sexps-wrap)
+        code-protect `(do
+                        (spit "###filename-status###" (str [:lpy-begin]) :append true)
+                        ~@requires-imports
+                        (try
+                          (let [~'capture ~@sexps-rest]
+                            (spit "###filename-capture###" ~'capture))
+                          (finally (spit "###filename-status###" (str [:lpy-end]) :append true))))
+        code-str (str code-protect)]
+    (debug :cp (pp-code code-protect))
+    `(with [tmpdir# (tempfile/TemporaryDirectory)]
+           (let [filename-lpy#    (os.path/join tmpdir# "code.lpy")
+                 filename-py#     (os.path/join tmpdir# "eval_file.py")
+                 filename-status# (os.path/join tmpdir# "status.file")
+                 filename-signal# (os.path/join tmpdir# "done.sig")
+                 filename-cap#    (os.path/join tmpdir# "capture.out")
+                 filename-exc#    (os.path/join tmpdir# "exception.log")
+
+                 code-lpy-str# (reduce (fn [acc# [from# to#]]
+                                         (str/replace acc# from# to#))
+                                       ~code-str
+                                       [["###filename-status###"  (as-posix filename-status#)]
+                                        ["###filename-capture###" (as-posix filename-cap#)]])
+                 code-py# (str "
+with open('" (as-posix filename-status#) "', 'a') as file: file.write('[:py-begin]')
+from basilisp_blender import eval as evl
+from basilisp.lang.exception import format_exception
+try:
+  evl.eval_file('" (as-posix filename-lpy#) "')
+except Exception as e:
+  with open('" (as-posix filename-status#) "', 'a') as file: file.write('[:py-exc]')
+  with open('" (as-posix filename-exc#)    "', 'w') as file: file.write(''.join(format_exception(e)))
+finally:
+  with open('" (as-posix filename-status#) "', 'a') as file: file.write('[:py-end]')
+  with open('" (as-posix filename-signal#) "', 'w') as file: pass")]
+
+             (spit filename-status# "[:blender-eval-begin]")
+             (spit filename-lpy# code-lpy-str#)
+             (spit filename-py# code-py#)
+             (let [status-modtime# (os.path/getmtime filename-status#)
+                   process# (tests.basilisp_blender.integration.integ_utils/blender_eval_file filename-py#)
+                   terminate!# (fn terminate!#
+                                 ([]
+                                  (terminate!# nil))
+                                 ([with-msg#]
+                                  (.terminate process#)
+                                  (when with-msg#
+                                    (let [[out# err#] (.communicate process#)]
+                                      (info)
+                                      (info :---blender-process-terminated (str with-msg#))
+                                      (info :---blender-process-stdout---)
+                                      (info  (str out#))
+                                      (info :---blender-process-stderr---)
+                                      (info (str err#))
+                                      (info :---)
+                                      (info)))))
+                   cnt-max# 20
+                   int-sec# 0.5]
+               (try
+                 (loop [cnt# 0]
+                   (if-not (= status-modtime# (os.path/getmtime filename-status#))
+                     (do
+                       (spit filename-status# (str [:py-started-in :secs (* cnt# int-sec#)]) :append true)
+                       (loop []
+                         (when-not  (os.path/exists filename-signal#)
+                           (time/sleep int-sec#)
+                           (recur))))
+
+                     (if (= cnt# cnt-max#)
+                       (spit filename-status# (str [:py-timed-out :secs (* cnt# int-sec#)]) :append true)
+                       (do
+                         (spit filename-status# (str [:py-wait :iter cnt#]) :append true)
+                         (time/sleep int-sec#)
+                         (recur (inc cnt#))))))
+                 (catch python/Exception e#
+                   (spit filename-status# (str [:blender-eval-exc e#]) :append true)
+                   (spit filename-exc#    (str "\n\n------------\n\n"
+                                               [:blender-eval-exc e#]) :append true)
+                   (terminate!# :blender-eval-exc)))
+               (when ~terminate?
+                 (terminate!# :blender-eval-opt-terminate))
+               (let [status# (slurp filename-status#)
+                     cap# (when (os.path/exists filename-cap#)
+                            (slurp filename-cap#))
+                     exc# (when (os.path/exists filename-exc#)
+                            (slurp filename-exc#))
+                     lpy-cap# (try (edn/read-string cap#)
+                                   (catch python/Exception e#
+                                     (str [":lpy result, can't decode input: " (str e#) :input cap#])))]
+                 (when exc#
+                   (println :blender-eval/exception (type exc#) exc#))
+                 (cond-> {:process process#
+                          :status status#}
+                   ~(not terminate?)
+                   (assoc :terminate! terminate!#)
+
+                   exc#
+                   (assoc :error exc#)
+
+                   cap#
+                   (assoc :result lpy-cap#))))))))
+
+(deftest-ui test-blender-eval
+  (testing "Basic functionality"
+    (let [{:keys [result status terminate!]}
+          (blender-eval
+            (+ 1 2))]
+
+      (is (nil? terminate!))
+      (is (str/ends-with? status "[:lpy-begin][:lpy-end][:py-end]") status)
+      (is (= {:res 3 :outstr "" :errstr ""} result))))
+
+  (testing "background"
+    (let [{:keys [result terminate!]} (blender-eval
+                                        {:terminate? false}
+                                        (+ 5 2))]
+      (is terminate!)
+      (try
+        (is (= {:outstr "" :errstr "" :res 7} result))
+        (finally
+          (terminate! :test-background)))))
+
+  (testing "Exception handling"
+    (let [{:keys [result terminate!]} (blender-eval
+                                        (throw (python/Exception "Test exception")))]
+      (is (= {:outstr "" :errstr "" :exc "Exception('Test exception')"} result))))
+
+  (testing "Output capture"
+    (let [{:keys [result]}
+          (blender-eval
+            (print "Hello, Blender!")
+            (binding [*out* *err*]
+              (print "Error message"))
+            (def x 10)
+            (def y 20)
+            (+ x y))]
+
+      (is (= {:res 30 :outstr "Hello, Blender!" :errstr "Error message"} result))))
+
+  (testing "Requires and imports"
+    (let [{:keys [result]} (blender-eval
+                   (require '[clojure.string :as str])
+                   (import [os.path :as p])
+                   (str/upper-case (p/join "hello" "there")))
+          ps os.path/sep]
+
+      (is (= {:res (str "HELLO" ps "THERE"), :errstr "", :outstr ""} result))))
+
+  (testing "Blender-specific functionality"
+    ;; Note: This test assumes Blender is properly set up and the necessary Python modules are available
+    (let [{:keys [result]} (blender-eval
+                   (import bpy)
+                   (-> bpy.data/objects
+                       (aget "Cube")
+                       .-location
+                       .to-tuple
+                       py->lisp))]
+
+      (is (= {:res [0.0 0.0 0.0]
+              :errstr ""
+              :outstr ""} result)))))
+
+#_(pp/pprint (test-blender-eval))
+
+

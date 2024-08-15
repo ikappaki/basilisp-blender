@@ -1,0 +1,208 @@
+(ns tests.basilisp-blender.utils-test
+  (:require
+   [basilisp.string :as str]
+   [basilisp.test :refer [deftest is testing]]
+   [basilisp-blender.utils :as u]))
+
+
+(deftest test-error
+  (testing "error-make"
+    (is (= (u/error-make :error-type :message :context)
+           '(:error-type :message :context)))
+    (let [ex (Exception "hello")]
+      (is (= (u/error-make :before ex :after)
+             (list :before ex :after) ))))
+
+  (testing "error-add macro"
+    (let [ex1 (Exception "first")
+          ex2 (Exception "second")
+          base-error (u/error-make :base-error ex1 :init-msg)
+          updated-error (u/error-add base-error :additional-info ex2 :more-info)]
+      (is (= updated-error (list :additional-info ex2 :more-info :base-error ex1 :init-msg)))))
+
+  (testing "error->str macro"
+    (let [error-without-exceptions (u/error-make :error-type :message)
+          error-with-exceptions (u/error-make :error-type :message (Exception. "Exception msg 1"))
+          error-with-more-exceptions (u/error-add error-with-exceptions
+                                                  :more (Exception. "Exception msg 2") "after")]
+      (is (= (u/error->str error-without-exceptions)
+             ":error-type :message"))
+
+      (is (= [":error-type :message Exception('Exception msg 1')"
+              ""
+              "--exception details--"
+              ""
+              "Exception: Exception msg 1"]
+             (str/split-lines (u/error->str error-with-exceptions))))
+
+      (is (= [":more Exception('Exception msg 2') after :error-type :message Exception('Exception msg 1')"
+              ""
+              "--exception details--"
+              ""
+              "Exception: Exception msg 2"
+              ""
+              "Exception: Exception msg 1"]
+             (str/split-lines (u/error->str error-with-more-exceptions)))))))
+#_(test-error)
+
+
+(deftest eprotect
+  (testing "plain"
+    (let [ret (u/with-eprotect :id-test-error
+                {:abc 5})]
+      (is (= ret {:abc 5})))
+
+    (let [exc (Exception "hi")
+          ret (u/with-eprotect [:id-test-error 53]
+                (+ 1 2)
+                (throw exc))]
+      (is (= {:error (u/error-make [:id-test-error 53] exc)} ret)))
+
+    (let [exc (Exception "hi5")
+          ret (u/with-eprotect {:id :id-test-error5}
+                (throw exc)
+                (+ 5 6))]
+      (is (= {:error (u/error-make :id-test-error5 exc)} ret))))
+
+  (testing "opts error"
+    (is (thrown-with-msg?
+         ValueError
+         "id-or-otps should contain an :id key."
+         (macroexpand-1 '(u/with-eprotect {:abc 123}))))
+
+    (is (thrown-with-msg?
+         ValueError
+         #"id-or-opts should only contained supported option keys:.*"
+         (macroexpand-1 '(u/with-eprotect {:id 123 :garbage 5})))))
+
+  (testing "on-err-str"
+    (let [exc (Exception "hi")
+          details* (atom nil)
+          ret (u/with-eprotect {:id :id-test-error :on-err-str #(reset! details* %)}
+                (throw exc))]
+      (is (= {:error (u/error-make :id-test-error exc)} ret))
+      (is (= [":id-test-error Exception('hi')"
+              ""
+              "--exception details--"
+              ""
+              "Traceback (most recent call last):"]
+             (take 5 (str/split-lines @details*)))))))
+
+#_(eprotect)
+
+(definterface ITestProxySingleArg
+  (arg-simple [arg]))
+(definterface ITestProxySimpleVariadic
+  (variadic-simple [arg1 arg2 & more]))
+(definterface ITestProxyFullVariadic
+  (variadic-full [& more]))
+(definterface ITestProxyMultiArgs
+  (none [])
+  (one-arg [arg]))
+
+(deftest test-class-make*
+  (testing "class make of fields"
+    (let [cl (u/class-make* cl-test []
+                            [^{:default 5} field1])]
+      (is (= 5 (.-field1 cl))))
+
+    (let [cl (u/class-make* cl-test []
+                            [^python/int field2])]
+      (is (not (some #{"fields2"} (set (.-__dict__ cl)))))
+      (is (= python/int (aget (.-__annotations__ cl) "field2"))))
+
+    (let [cl (u/class-make* cl-test []
+                            [^{:tag (do python/float)} field10
+
+                             ^{:default {:1 1}}        field11
+
+                             ^{:tag (do python/str)
+                               :default "something"}   field12])]
+      (is (= python/float (aget (.-__annotations__ cl) "field10")))
+      (is (= {:1 1} (.-field11 cl)))
+      (is (= python/str (aget (.-__annotations__ cl) "field12")))
+      (is (= "something" (.-field12 cl))))
+
+    (is (thrown-with-msg?
+         ValueError
+         "Error: field`fielde' should have a `default` or `tag` meta key defined."
+         (u/class-make* cl-test [] [^{:other 5} fielde]))))
+
+  (testing "class make of simple fn with args"
+    (let [cl (u/class-make* cl-test [ITestProxySingleArg] []
+                            (arg-simple
+                             "docstring"
+                             [value]
+                             (inc value)))
+          p (cl)]
+      (is (= 6 (.arg-simple p 5)))
+
+      (is (thrown? python/TypeError (.arg-simple p)))
+      (is (thrown? python/TypeError (.arg-simple p 2 3)))))
+
+  (testing "class make of simple fn with args and fields"
+    (let [cl (u/class-make* cl-test [ITestProxySingleArg]
+                            [^{:default 15
+                               :tag python/int} field15]
+                            (arg-simple [value]
+                                       (+ value (-field15))))
+          p (cl)]
+      (is (= 20 (.arg-simple p 5)))
+      (is (= 15 (.-field15 cl)))
+      (is (= 15 (.-field15 p)))
+      (is (thrown? python/TypeError (.arg-simple p)))
+      (is (thrown? python/TypeError (.arg-simple p 2 3)))))
+
+  (testing "class make of simple variadic fn"
+    (let [cl (u/class-make* cl-test [ITestProxySimpleVariadic] []
+                            (variadic-simple [arg1 arg2 & more] [arg1 arg2 more]))
+          p (cl)]
+      (is (= [5 6 nil] (.variadic-simple p 5 6)))
+      (is (= [5 6 '(2 3)] (.variadic-simple p 5 6 2 3)))
+
+      (is (thrown? python/TypeError (.variadic-simple p)))
+      (is (thrown? python/TypeError (.variadic-simple p 1)))))
+
+  (testing "class make of full variadic fn"
+    (let [cl (u/class-make* cl-test [ITestProxyFullVariadic] []
+                            (variadic-full [& more] more))
+          p (cl)]
+      (is (= '(5 6 2 3) (.variadic-full p 5 6 2 3)))))
+
+  (testing "class make of functions with various length of args"
+    (let [cl (u/class-make* cl-test [ITestProxyMultiArgs] []
+                            (none [] "hi")
+                            (one-arg [arg] arg))
+          p (cl)]
+      (is (= "hi" (.none p)))
+      (is (= 5 (.one-arg p 5)))))
+
+  (testing "simple class with interface and `self` anaphora"
+    (let [cl (u/class-make* cl-test [io/StringIO ITestProxySingleArg] []
+                            (arg-simple [arg] (.write self arg)))
+          p (cl)]
+      (is (= 2 (.arg-simple p "hi")))
+      (is (= "hi" (.getvalue p)))))
+
+  (testing "simple class with a new fn taking pythonic keyword args"
+    (let [cl (u/class-make* cl-test [io/StringIO] []
+                            ^{:kwargs :collect} (xyz [arg1 {:as kwargs}]
+                                                     [arg1 kwargs]))
+          p (cl)]
+      (is (= [1 {:kw1 2 :kw2 3}] (.xyz p 1 ** :kw1 2 :kw2 3)))))
+
+  (testing "proxy class overriding taking pythonic keyword args"
+    (let [encoding-default (.-encoding (io/TextIOWrapper (io/BufferedIOBase)))
+          cl (u/class-make* cl-test1 [io/TextIOWrapper] [])
+          cl-override (u/class-make* cl-test2 [io/TextIOWrapper] []
+                                     ^{:kwargs :collect} (reconfigure [{:as kwargs}]
+                                                                      kwargs))
+          p (cl (io/BufferedIOBase))
+          p-override (cl-override (io/BufferedIOBase))]
+      (is (nil? (.reconfigure p ** :encoding "ascii")))
+      (let [encoding-new (.-encoding p)]
+        (is (= "ascii" encoding-new))
+        (is (not= encoding-default encoding-new)))
+
+      (is (= {:encoding :xyz} (.reconfigure p-override ** :encoding :xyz)))
+      (is (= encoding-default (.-encoding p-override))))))

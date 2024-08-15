@@ -1,12 +1,9 @@
 import pytest
 
-from tests.basilisp_blender.integration import test_utils as tu
-
-pytestmark = pytest.mark.integration
-
+from tests.basilisp_blender.integration import integ_utils as iu
 
 def test_eval_editor():
-    result = tu.blender_eval(
+    result = iu.blender_eval(
         """from basilisp_blender import eval as evl
 import bpy
 before = 0
