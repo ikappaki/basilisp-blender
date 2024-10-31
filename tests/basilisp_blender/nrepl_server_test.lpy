@@ -8,13 +8,18 @@
    [basilisp.io :as bio]
    [basilisp.set :as set]
    [basilisp.string :as str :refer [starts-with?]]
-   [basilisp.test :refer [deftest are is testing]])
+   [basilisp.test :refer [deftest are is testing use-fixtures]]
+   [basilisp.test.fixtures :as fixtures :refer [*tempdir*]])
   (:import
    [datetime :as dt]
    os
    socket
    tempfile
-   time))
+   threading
+   time
+   urllib))
+
+(use-fixtures :each fixtures/tempdir)
 
 (def ^:dynamic *nrepl-port*
   "The port the :lpy:py:`with-server` is bound to."
@@ -521,7 +526,9 @@
             {:id @id* :ns "xyz" :status ["done"]})
 
           (client-send! client {:id (id-inc!) :op "eval" :code "(/ 3 0)"})
-          (is (= {:id @id* :err "ZeroDivisionError('Fraction(3, 0)')"} (client-recv! client)))
+          (let [{:keys [id err]} (client-recv! client)]
+               (is (= id @id* ))
+               (is (str/includes? err "ZeroDivisionError: Fraction(3, 0)")))
           (let [{:keys [id ex status ns]} (client-recv! client)]
             (is (= @id* id))
             (is (= "xyz" ns))
@@ -533,8 +540,10 @@
           (client-send! client {:id (id-inc!) :op "eval" :code "(println :hey)\n(/ 4 0)"})
           (are [response] (= response (client-recv! client))
             {:id @id* :out ":hey"}
-            {:id @id* :out os/linesep}
-            {:id @id* :err "ZeroDivisionError('Fraction(4, 0)')"})
+            {:id @id* :out os/linesep})
+          (let [{:keys [id err]} (client-recv! client)]
+            (is (= @id* id))
+            (is (str/includes? err "ZeroDivisionError: Fraction(4, 0)")))
           (let [{:keys [id ex status ns]} (client-recv! client)]
             (is (= @id* id))
             (is (= "xyz" ns))
@@ -543,15 +552,23 @@
           (are [response] (= response (client-recv! client))
             {:id @id* :ns "xyz" :status ["done"]})
 
-          (client-send! client {:id (id-inc!) :op "eval" :code "[*1 *2 *3 *e]"})
+          (client-send! client {:id (id-inc!) :op "eval" :code "[*1 *2 *3]"})
           (are [response] (= response (client-recv! client))
-            {:id @id* :ns "xyz" :value "[6 nil 4 ZeroDivisionError('Fraction(4, 0)')]"}
+            {:id @id* :ns "xyz" :value "[6 nil 4]"}
+            {:id @id* :ns "xyz" :status ["done"]})
+
+          (client-send! client {:id (id-inc!) :op "eval" :code "*e"})
+          (let [{:keys [id value status]} (client-recv! client)]
+            (is (= @id* id))
+            (is (str/includes? value "ZeroDivisionError: Fraction(4, 0)") value))
+          (are [response] (= response (client-recv! client))
             {:id @id* :ns "xyz" :status ["done"]})
 
           ;; error with :file
           (client-send! client {:id (id-inc!) :op "eval" :file "/hey/you.lpy" :code "1\n2\n(/ 5 0)"})
-          (are [response] (= response (client-recv! client))
-            {:id @id* :err "ZeroDivisionError('Fraction(5, 0)')"})
+          (let [{:keys [id err]} (client-recv! client)]
+            (is (= @id* id))
+            (is (str/includes? err "ZeroDivisionError: Fraction(5, 0)")))
           (let [{:keys [id ex status ns]} (client-recv! client)]
             (is (= @id* id))
             (is (= "xyz" ns))
@@ -564,7 +581,11 @@
           (client-send! client {:id (id-inc!) :op "eval" :code "(xyz"})
           (let [{:keys [id err]} (client-recv! client)]
             (is (= @id* id))
-            (is (str/starts-with? err "basilisp.lang.reader.SyntaxError")))
+            (is (= [""
+                    "  exception: <class 'basilisp.lang.reader.UnexpectedEOFError'>"
+                    "    message: Unexpected EOF in list"
+                    "       line: 1:4"]
+                   (str/split-lines err))))
           (let [{:keys [id ex status ns]} (client-recv! client)]
             (is (= @id* id))
             (is (= "xyz" ns))
@@ -574,7 +595,15 @@
             {:id @id* :ns "xyz" :status ["done"]})
 
           (client-send! client {:id (id-inc!) :op "eval" :code "(+ 3 5)" :ns "not-there"})
-          (is (= {:id @id* :err "CompilerException(msg=\"unable to resolve symbol '+' in this context\", phase=<CompilerPhase.ANALYZING: :analyzing>, filename='<nREPL Input>', form=+, lisp_ast=None, py_ast=None)"} (client-recv! client)))
+          (let [{:keys [id err]} (client-recv! client)]
+            (is (= id @id*))
+            (is (= [""
+                    "  exception: <class 'basilisp.lang.compiler.exception.CompilerException'>"
+                    "      phase: :analyzing"
+                    "    message: unable to resolve symbol '+' in this context"
+                    "       form: +"
+                    "   location: <nREPL Input>:1"]
+                   (str/split-lines err))))
           (let [{:keys [id ex status ns]} (client-recv! client)]
             (is (= @id* id))
             (is (= "not-there" ns))
@@ -598,7 +627,13 @@
 
         ;; bad namespace
         (client-send! client {:id 3 :op "eval" :code "(+ 3 5)" :ns "#,,"})
-        (is (= {:id 3 :err "CompilerException(msg=\"unable to resolve symbol '+' in this context\", phase=<CompilerPhase.ANALYZING: :analyzing>, filename='<nREPL Input>', form=+, lisp_ast=None, py_ast=None)"} (client-recv! client)))
+        (let [{:keys [id err]} (client-recv! client)]
+          (is (= 3 id))
+          (is (= [""
+                  "  exception: <class 'basilisp.lang.compiler.exception.CompilerException'>"
+                  "      phase: :analyzing" "    message: unable to resolve symbol '+' in this context"
+                  "       form: +" "   location: <nREPL Input>:1"]
+                 (str/split-lines err))))
         (let [{:keys [id ex status ns]} (client-recv! client)]
           (is (= 3 id))
           (is (= "#,," ns))
@@ -619,13 +654,17 @@
           (let [{:keys [status]} (client-recv! client)]
             (is (= ["done"] status)))
           (client-send! client {:id (id-inc!) :op "info" :ns "user" :sym "sort-by"})
-          (let [{:keys [file line] :as response} (client-recv! client)
-                {:keys [doc]
-                 meta-file :file} (meta (resolve 'sort-by))]
+          (let [{:keys [file line column] :as response} (client-recv! client)
+                {:keys [doc col]
+                 meta-file :file
+                 meta-line :line} (meta (resolve 'sort-by))
+                meta-file-uri     (->> (urllib.parse/quote meta-file)
+                                       (urllib.parse/urljoin "file:"))]
             (is (= {:ns "basilisp.core" :status ["done"] :id @id* :arglists-str "[keyfn coll]\n[keyfn cmp coll]"
+                    :line line :column col
                     :doc doc :name "sort-by"}
-                   (select-keys response [:ns :status :id :arglists-str :doc :name])))
-            (is (= meta-file file)))
+                   (select-keys response [:ns :status :id :arglists-str :doc :name :line :column])))
+            (is (= meta-file-uri file)))
 
           ;; test fqdn, aliases and refers
           (client-send! client {:id (id-inc!) :op "eval"
@@ -689,13 +728,25 @@
     (with-server-make {}
       (with-connect client
         (let [id* (atom 0)
-              id-inc! #(swap! id* inc)]
+              id-inc! #(swap! id* inc)
+              filename (str (bio/path *tempdir* "load-file-test.lpy"))]
           (client-send! client {:id (id-inc!) :op "clone"})
           (let [{:keys [status]} (client-recv! client)]
             (is (= ["done"] status)))
+
+          (spit filename "(ns abc.xyz (:require [clojure.string :as str])
+(:import [sys :as s]))
+(defn afn []
+  (str/lower-case \"ABC\"))
+(comment
+  (abc)
+  (xyz))
+
+(afn)")
+
           (client-send! client {:id (id-inc!) :op "load-file"
-                                :ns "user" :file "(ns abc.xyz (:require [clojure.string :as str]) (:import [sys :as s])) (defn afn []  (str/lower-case \"ABC\")) (afn)"
-                                :file-name "xyz.lpy" :file-path "/abc/xyz.lpy"})
+                                :ns "user" :file (slurp filename)
+                                :file-name "xyz.lpy" :file-path filename})
           (are [response] (= response (client-recv! client))
             {:id @id* :ns "abc.xyz" :value "\"abc\""}
             {:id @id* :ns "abc.xyz" :status ["done"]})
@@ -727,9 +778,42 @@
             {:id @id* :ns "abc.other" :value "\"abc\""}
             {:id @id* :ns "abc.other" :status ["done"]})
 
+          (client-send! client {:id (id-inc!) :ns "abc.xyz" :op "eval" :code "(abc)"
+                                :file filename
+                                :line 6 :column 2})
+          (let [{:keys [id err]} (client-recv! client)]
+            (is (= @id* id))
+            (is (= [""
+                    "  exception: <class 'basilisp.lang.compiler.exception.CompilerException'>"
+                    "      phase: :analyzing"
+                    "    message: unable to resolve symbol 'abc' in this context"
+                    "       form: abc"
+                    (str "   location: " filename ":6")
+                    "    context:"
+                    ""
+                    " 2   | (:import [sys :as s]))"
+                    " 3   | (defn afn []"
+                    " 4   |   (str/lower-case \"ABC\"))"
+                    " 5   | (comment"
+                    " 6 > |   (abc)"
+                    " 7   |   (xyz))"
+                    " 8   | "
+                    " 9   | (afn)"]
+                   (str/split-lines err))))
+          (let [{:keys [id ex status ns]} (client-recv! client)]
+            (is (= @id* id))
+            (is (= "abc.xyz" ns))
+            (is (= ["eval-error"] status))
+            (is (str/starts-with? ex "Traceback (most recent call last):")))
+          (are [response] (= response (client-recv! client))
+            {:id @id* :ns "abc.xyz" :status ["done"]})
+
+
           (client-send! client {:id (id-inc!) :op "load-file" :ns "user" :file "(ns abc.third)\n\n(/ 3 0)"
                                 :file-name "third.lpy" :file-path "/abc/third.lpy"})
-          (is (= {:id @id* :err "ZeroDivisionError('Fraction(3, 0)')"} (client-recv! client)))
+          (let [{:keys [id err]} (client-recv! client)]
+            (is (= @id* id))
+            (is (str/includes? err "ZeroDivisionError: Fraction(3, 0)") (str/split-lines err)))
           (let [{:keys [id ex status ns]} (client-recv! client)]
             (is (= @id* id))
             (is (= "abc.third" ns))
@@ -737,18 +821,18 @@
             (is (not= -1 (.find ex "File \"/abc/third.lpy\", line 3")) ex)
             (is (str/starts-with? ex "Traceback (most recent call last):")))
           (are [response] (= response (client-recv! client))
-            {:id @id* :ns "abc.third" :status ["done"]}))))
+            {:id @id* :ns "abc.third" :status ["done"]})))))
 
-    (testing "no file"
-      (with-server-make {}
-        (with-connect client
-          (client-send! client {:id 1 :op "clone"})
-          (let [{:keys [status]} (client-recv! client)]
-            (is (= ["done"] status)))
-          (client-send! client {:id 2 :op "load-file" :ns "user"})
-          (are [response] (= response (client-recv! client))
-            {:id 2 :ns "user" :value "nil"}
-            {:id 2 :ns "user" :status ["done"]}))))))
+  (testing "no file"
+    (with-server-make {}
+      (with-connect client
+        (client-send! client {:id 1 :op "clone"})
+        (let [{:keys [status]} (client-recv! client)]
+          (is (= ["done"] status)))
+        (client-send! client {:id 2 :op "load-file" :ns "user"})
+        (are [response] (= response (client-recv! client))
+          {:id 2 :ns "user" :value "nil"}
+          {:id 2 :ns "user" :status ["done"]})))))
 
 (defmacro with-start-server
   [opts & body]

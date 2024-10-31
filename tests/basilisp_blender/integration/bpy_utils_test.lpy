@@ -347,9 +347,8 @@
       ;; Test error handling
       (let [{:keys [err exc]} (with-client-eval!
                                 (/ 1 0))]
-        (is (= "ZeroDivisionError('Fraction(1, 0)')" err))
-        (is (str/starts-with? exc "Traceback (most recent call last):") exc))
-      )))
+        (is (str/includes? err "ZeroDivisionError: Fraction(1, 0)") err)
+        (is (str/starts-with? exc "Traceback (most recent call last):") exc)))))
 
 #_(tu/pp-code (test-with-blender-nrepl-run))
 

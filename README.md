@@ -122,21 +122,16 @@ Here is an example of Basilisp code to create a torus pattern using the bpy Blen
   (:import bpy
            math))
 
-(def object (.. bpy/ops -object))
-(def materials (.. bpy/data -materials))
-(def mesh (.. bpy/ops -mesh))
-
-
 (defn clear-mesh-objects []
-  (.select-all object ** :action "DESELECT")
-  (.select-by-type object ** :type "MESH")
-  (.delete object))
+  (.select-all     bpy.ops/object ** :action "DESELECT")
+  (.select-by-type bpy.ops/object ** :type "MESH")
+  (.delete         bpy.ops/object))
 
 (clear-mesh-objects)
 
 (defn create-random-material []
-  (let [mat (.new materials ** :name "RandomMaterial")
-        _ (set! (.-use-nodes mat) true)
+  (let [mat  (.new bpy.data/materials ** :name "RandomMaterial")
+        _    (set! (.-use-nodes mat) true)
         bsdf (aget (.. mat -node-tree -nodes) "Principled BSDF")]
 
     (set! (-> bsdf .-inputs (aget "Base Color") .-default-value)
@@ -144,15 +139,14 @@ Here is an example of Basilisp code to create a torus pattern using the bpy Blen
     mat))
 
 (defn create-torus [radius tube-radius location segments]
-  (.primitive-torus-add mesh **
+  (.primitive-torus-add bpy.ops/mesh **
                         :major-radius radius
                         :minor-radius tube-radius
                         :location location
                         :major-segments segments
                         :minor-segments segments)
-  (let [obj (.. bpy/context -object)
-        material (create-random-material)]
-    (-> obj .-data .-materials (.append material))))
+  (let [material (create-random-material)]
+    (-> bpy.context/object .-data .-materials (.append material))))
 
 #_(create-torus 5, 5, [0 0 0] 48)
 
@@ -242,3 +236,10 @@ $ poetry build                                    # build the package
 $ poetry run python scripts/bb_package_install.py # install it in Blender
 ```
 
+# License
+
+This project is licensed under the Eclipse Public License 2.0. See the [LICENSE](LICENSE) file for details.
+
+# Acknowledgments
+
+The nREPL server is a spin-off of [Basilisp](https://github.com/basilisp-lang/basilisp)'s `basilisp.contrib.nrepl-server` namespace.
