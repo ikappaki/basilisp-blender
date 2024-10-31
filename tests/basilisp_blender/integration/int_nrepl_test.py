@@ -4,10 +4,8 @@ import threading
 import nrepl as nrepl_client
 import pytest
 
-import tests.basilisp_blender.integration.test_utils as tu
-
-pytestmark = pytest.mark.integration
-
+from dev.dev_utils import file_exists_wait
+import tests.basilisp_blender.integration.integ_utils as iu
 
 @pytest.mark.skipif(
     os.getenv("RUNNER_OS", "Linux") != "Linux",
@@ -34,8 +32,8 @@ logging.debug(":end")
 
     process = None
     try:
-        process = tu.blender_eval_file(codefile)
-        tu.file_exists_wait(portfile, 10, 0.5)
+        process = iu.blender_eval_file(codefile)
+        file_exists_wait(portfile, 10, 0.5)
         assert os.path.exists(str(portfile))
 
         port = None

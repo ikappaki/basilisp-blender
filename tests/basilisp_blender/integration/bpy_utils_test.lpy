@@ -1,0 +1,355 @@
+(ns tests.basilisp-blender.integration.bpy-utils-test
+  (:import logging
+           os
+           pathlib
+           re
+           socket
+           tempfile
+           time
+           tests.basilisp_blender.integration.integ_utils)
+  (:require [basilisp.contrib.bencode :as bc]
+            [basilisp.edn :as edn]
+            [basilisp.string :as str]
+            [basilisp.test :refer [is testing]]
+            [tests.basilisp-blender.integration.test-utils :as tu :refer [deftest-ui]]))
+
+
+(def ^:dynamic *nrepl-port*
+  "The port the `with-blender-nrepl-server` is bound to."
+  nil)
+
+(deftest-ui blender-nrepl-server-test
+  (let [{:keys [exc result error] :as _results}
+        (tu/blender-eval
+         ;; server side top level defs
+         (require '[basilisp-blender.bpy-utils :as bu])
+         (import tempfile)
+         (defmacro with-assoc-result
+           "Evaluates `body` associating result or exception in `results*` atom
+  under `key`."
+           [results* key & body]
+           `(->> (try
+                   ~@body
+                   (catch python/Exception e#
+                     (str e#)))
+                 (swap! ~results* assoc ~key)))
+
+         (let [results* (atom {})]
+
+           (with-assoc-result results* :simple
+             (+ 1 3))
+
+           (with-assoc-result results* :simple-exc
+             (throw (python/Exception "hello")))
+
+           (with-assoc-result results* :nrepl-simple
+             (let [{:keys [host nrepl-port-file port shutdown!]} (bu/nrepl-server-start {})]
+               (when shutdown! (shutdown!))
+               {:host host :nrepl-port-file nrepl-port-file :port port}))
+
+           (with-assoc-result results* :nrepl-host
+             (let [{:keys [host nrepl-port-file port shutdown!]} (bu/nrepl-server-start {:host "0.0.0.0"})]
+               (when shutdown! (shutdown!))
+               {:host host :nrepl-port-file nrepl-port-file :port port}))
+
+           (with-assoc-result results* :nrepl-port
+               (bu/nrepl-server-start {:port -1}))
+
+           (with-assoc-result results* :nrepl-port-dir
+             (let [{:keys [shutdown!] :as result} (bu/nrepl-server-start {})]
+               (when shutdown! (shutdown!))
+               result))
+
+           (with-assoc-result results* :nrepl-port-dir-other
+             (with [tmpdir (tempfile/TemporaryDirectory)]
+                   (let [{:keys [shutdown!] :as result} (bu/nrepl-server-start {:nrepl-port-dir tmpdir})]
+                     (when shutdown! (shutdown!))
+                     (assoc result :test/temp-dir tmpdir))))
+
+           @results*))]
+
+
+    (is (nil? exc) exc)
+    (is (nil? error) error)
+    (is (map? result))
+
+    (let [{:keys [errstr res outstr]} result]
+      (is (= "" outstr))
+      (is (= "" errstr))
+      (is (map? res) res)
+
+      (when (map? res)
+        (let [{:keys [simple simple-exc
+                      nrepl-simple nrepl-host nrepl-port
+                      nrepl-port-dir nrepl-port-dir-other]} res]
+
+          (is (= 4 simple))
+          (is (= "Exception('hello')" simple-exc))
+
+          (is (map? nrepl-simple) nrepl-simple)
+          (let [{:keys [host nrepl-port-file port]} nrepl-simple]
+            (is (= "127.0.0.1" host))
+            (is (pos? port) port)
+            (is (string? nrepl-port-file) nrepl-port-file))
+
+          (let [{:keys [host]} nrepl-host]
+            (is (= "0.0.0.0" host)))
+
+          (let [{:keys [error]} nrepl-port
+                [server-make-error [type-of overflow val]] error]
+            (is (= :server-make-error server-make-error))
+            (is (= :type-of type-of))
+            (is (= overflow "<class 'OverflowError'>"))
+            (is (string? val)))
+
+          (let [{:keys [nrepl-port-file]} nrepl-port-dir
+                path-expected (os.path/abspath (os.path/join "." ".nrepl-port"))]
+            (is (= path-expected nrepl-port-file) nrepl-port-dir))
+
+          (let [{:keys [nrepl-port-file]
+                 :test/keys [temp-dir]} nrepl-port-dir-other
+                path-expected (os.path/join temp-dir ".nrepl-port")]
+            (is (= path-expected nrepl-port-file) nrepl-port-dir-other))
+          )))))
+
+#_(tu/pp-code (blender-nrepl-server-test))
+
+(defmacro with-blender-nrepl-server [& body]
+  "Starts a Blender process running an nREPL server with `opts`
+  and executes `body`, with the `port` symbol bound to the server's
+  port number."
+  `(let [{result#     :result
+          error#      :error
+          process#    :process
+          terminate!# :terminate!}
+         (tu/blender-eval
+          {:terminate? false}
+
+          (require '[basilisp-blender.bpy-utils :as bu])
+          (let [{host# :host port# :port :as all#}
+                (bu/nrepl-server-start {})]
+            port#))]
+     (try
+       (let [{port# :res} result#]
+         (binding [*nrepl-port* port#]
+           ~@body))
+       (finally
+         (terminate!# :with-blender-nrepl-server)))))
+
+(deftest-ui test-with-blender-nrepl-server
+  (testing "Runtime behavior"
+    (with-blender-nrepl-server
+      (is (pos? *nrepl-port*))
+
+      (testing "nREPL server is accessible"
+        (with [sock (socket/socket socket/AF_INET socket/SOCK_STREAM)]
+              (.connect sock #py ("127.0.0.1" *nrepl-port*))
+              (.sendall sock (bc/encode {:op "clone"}) )
+              (let [data (.recv sock 8192)
+                    [[item1 _] _ :as decoded] (bc/decode-all data {:keywordize-keys true?
+                                                   :string-fn #(.decode % "utf-8")})
+                    {:keys [status]} item1]
+                (is (= ["done"] status) decoded))))))
+
+  (testing "Error handling"
+    (try
+      (with-blender-nrepl-server
+        (throw (Exception. "Test exception")))
+      (catch Exception e
+        (is (= "Exception('Test exception')" (str e)))))))
+
+#_(test-with-blender-nrepl-server)
+
+(defn client-make!
+  "Creates and returns an nREPL client."
+  []
+  (let [sock (socket/socket socket/AF_INET socket/SOCK_STREAM)]
+    {:sock sock
+     :backlog* (atom {:items [] :fraction nil})
+     :last-id* (atom 0)}))
+
+(defn client-close!
+  "Closes the nREPL `client` connection."
+  [client]
+  (.close (:sock client)))
+
+(defn client-send!
+  "Sends `value` (a map) to the nREPL server from the given `client`."
+  [client value]
+  (let [{:keys [sock last-id*]} client
+        id (swap! last-id* inc)
+        v (bc/encode (assoc value :id id))]
+    (.sendall sock v)))
+
+(defn client-recv!
+  "Receives data from the server via `client`. Processes any backlog or
+  incoming data, decodes it, and returns the first item. Updates the
+  backlog with remaining data."
+  [client]
+  (let [{:keys [sock backlog*]} client]
+    (loop [{:keys [items fraction]} @backlog*]
+      (if-let [item (first items)]
+        (do (reset! backlog* {:items (drop 1 items) :fraction fraction})
+            item)
+
+        (let [data (.recv sock 8192)
+              data (if fraction (+ fraction data) data)
+              [items-d remaining :as response] (bc/decode-all data {:keywordize-keys true
+                                                                    :string-fn #(.decode % "utf-8")})
+              items (concat items items-d)
+              [item & items-left] items]
+          (recur {:items items :fraction remaining}))))))
+
+(deftest-ui test-client
+  (testing "nREPL server is accessible"
+    (with-blender-nrepl-server
+      (is (pos? *nrepl-port*))
+
+      (testing "client connect, send and receive"
+        (let [{:keys [sock] :as client} (client-make!)]
+          (try
+            (.connect sock (python/tuple ["127.0.0.1" *nrepl-port*]))
+            (.settimeout sock 1)
+            (let [[server port](.getpeername sock)]
+              (is (= "127.0.0.1" server))
+              (is (= *nrepl-port* port)))
+
+            (client-send! client {:op "clone"})
+            (let [msg (client-recv! client)]
+              (is (= {:status ["done"] :id 1} (dissoc msg :new-session)) msg))
+
+            (finally
+              (client-close! client))))))))
+
+#_(tu/pp-code (test-client))
+
+(def ^:dynamic *nrepl-client*
+  "Will be bouund to the nREPL client `with-connect` is connected to the
+  nREPL server with."
+  nil)
+
+(defmacro with-connect [port & body]
+  "A macro that establishes a connection to the specified `port` on
+  the local interface using a new nREPL client. It binds the client to
+  `*nrepl-client*` and executes the `body` forms within this context."
+  `(let [{sock# :sock :as client#} (client-make!)]
+     (try
+       (binding [*nrepl-client* client#]
+         (.connect sock# (python/tuple ["127.0.0.1" ~port]))
+         (.settimeout sock# 1)
+         ~@body)
+       (finally
+         (client-close! client#)))))
+
+(defmacro with-client-eval!
+  "Evaluates `body` using the `*nrepl-client*` client, and returns a result map.
+
+  The returned result map has the following keys
+
+  :err The err stream as a string.
+
+  :exc The exception, if one was thrown.
+
+  :out The std out stream as a string.
+
+  :res The return value of the evaluation, with non primitive values
+  converted to a [:type-of <type name> (str value)] vector ."
+  [& body]
+  (let [[requires-imports sexps] (tu/requires-imports-split body)
+        body `((require '~'[basilisp.edn :as edn]
+                        '~'[basilisp.walk :as w])
+               ~@requires-imports
+               (let [res# (do ~@sexps)
+                     res# (w/postwalk (fn [x#] (if (or (coll? x#) (string? x#) (number? x#) (keyword? x#)
+                                                       (nil? x#))
+                                                 x#
+                                                 [:type-of (str (type x#)) (str x#)]))
+                                      res#)]
+                 res#))
+
+        body-str  (apply str (map #(str % "\n") body))]
+    `(do (client-send! *nrepl-client* {:op "eval" :code ~body-str})
+         (loop [ret# {}
+                iter-max# 1000]
+           (let [{err# :err ex# :ex out# :out status# :status value# :value :as result#} (client-recv! *nrepl-client*)
+                 ret# (cond-> ret#
+                        (contains? result# :value)
+                        (assoc :res (try
+                                      ;; this should always succeed,
+                                      ;; since the results was post
+                                      ;; walked.
+                                      (edn/read-string value#)
+                                      (catch python/Exception e#
+                                        [:with-client-eval-result-edn-error (str e#)])))
+
+                        (contains? result# :err)
+                        (assoc :err err#)
+
+                        (contains? result# :ex)
+                        (assoc :exc ex#)
+
+                        (contains? result# :out)
+                        (update :out (fn [s] (str s out#))))]
+             (cond
+               status#
+               ret#
+
+               (= iter-max# 0)
+               (throw (python/Exception (str [:with-client-eval!-error :iter-max-reached iter-max#])))
+
+               :else
+               (recur ret# (dec iter-max#))))))))
+
+(defmacro with-blender-nrepl-run
+  "Launches Blender and initializes an nREPL server at a randomly
+  assigned port, which is then bound to `*nrepl-port*`. It establishes
+  a client connection bound to `*nrepl-client*` and executes the
+  `body` forms in this context."
+  [& body]
+  `(with-blender-nrepl-server
+     (with-connect *nrepl-port*
+       (client-send! *nrepl-client* {:op "clone"})
+       (let [{status# :status :as ret#} (client-recv! *nrepl-client*)]
+         (when-not (= ["done"] status#)
+           (throw (python/Exception [:with-blender-nrepl-eval-clone-error ret#]))))
+       ~@body)))
+
+
+(deftest-ui test-with-blender-nrepl-run
+  (testing "Basic functionality"
+    (with-blender-nrepl-run
+      (is (number? *nrepl-port*) "nREPL port should be a number")
+      (is *nrepl-client* "nREPL client should be set")
+
+      ;; Test executing Blender Python code
+      (let [result (with-client-eval!
+                     (import bpy)
+                     (print :hey)
+                     (-> bpy.data/objects
+                         (aget "Cube")
+                         .-location
+                         .to-tuple
+                         py->lisp))]
+        (is (= {:out ":hey" :res [0.0 0.0 0.0]} result)))
+
+      (let [result (with-client-eval!
+                     {:a 15 :b [123]})]
+        (is (= {:res {:a 15 :b [123]}} result)))
+
+      ;; edn encoding error at the client
+      (let [{:keys [res] :as result} (with-client-eval!
+                                       (atom 5))
+            [type-of class-type error-msg] res]
+        (is (= :type-of type-of))
+        (is (= "<class 'basilisp.lang.atom.Atom'>" class-type))
+        (is (str/starts-with? error-msg "<basilisp.lang.atom.Atom object at") error-msg))
+
+      ;; Test error handling
+      (let [{:keys [err exc]} (with-client-eval!
+                                (/ 1 0))]
+        (is (= "ZeroDivisionError('Fraction(1, 0)')" err))
+        (is (str/starts-with? exc "Traceback (most recent call last):") exc))
+      )))
+
+#_(tu/pp-code (test-with-blender-nrepl-run))
+

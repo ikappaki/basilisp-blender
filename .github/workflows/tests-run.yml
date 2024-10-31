@@ -23,7 +23,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.version }}
 
@@ -34,7 +34,7 @@ jobs:
         run: |
           poetry config virtualenvs.create true --local
           poetry config virtualenvs.in-project true --local
-      - uses: actions/cache@v3
+      - uses: actions/cache@v4
         name: Define a cache for the virtual environment based on the dependencies lock file
         with:
           path: ./.venv
@@ -48,7 +48,7 @@ jobs:
 
       - name: Restore Blender from cache
         id: cache-blender
-        uses: actions/cache/restore@v3
+        uses: actions/cache/restore@v4
         with:
           path: ~/blender
           key: ${{ runner.os }}-blender-${{ matrix.blender }}
@@ -60,7 +60,7 @@ jobs:
           
       - name: "Save Blender in cache"
         if: steps.cache-blender.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v3
+        uses: actions/cache/save@v4
         with:
           path: ~/blender
           key: ${{ steps.cache-blender.outputs.cache-primary-key }}
@@ -75,4 +75,4 @@ jobs:
         run: |
           poetry build
           poetry run python scripts/bb_package_install.py
-          poetry run pytest -m integration -v
+          poetry run pytest --integration -v

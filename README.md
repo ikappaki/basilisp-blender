@@ -16,6 +16,41 @@ import pip
 pip.main(['install', 'basilisp-blender'])
 ```
 
+## Setup
+
+### nREPL server control panel
+
+The library includes an nREPL server control panel accessible in Blender’s properties editor, under the Output panel (icon resembling a printer). From here, users can:
+- Start and stop the server.
+- Configure the local interface address and port.
+- Set the location of the `.nrepl-port` file for editor connections.
+
+
+![nrepl cntrl pnael output - ready](examples/nrepl-ctrl-panel-output-ready.png)
+
+![nrepl cntrl pnael output - ready](examples/nrepl-ctrl-panel-output-serving.png)
+
+Note: The control panel does not appear automatically and must be activated manually via Blender's Python console within the `Scripting` workspace. To activate, run:
+
+```python
+import basilisp_blender
+basilisp_blender.control_panel_create()
+```
+
+To autoload the panel automatically at Blender’s startup, create a startup file in Blender's `<blender-version>/scripts/startup/` directory. For example, save the code below, say as `bb.py`, in that directory:
+
+```python
+import basilisp_blender
+basilisp_blender.control_panel_create()
+
+def register():
+    pass
+def unregister():
+    pass
+if __name__ == "__main__":
+    register()
+```
+
 ## Usage
 ### Evaluating Basilisp Code
 
@@ -49,7 +84,7 @@ eval_editor("<text-block-name>")
 ```
 
 #### Starting an nREPL Server
-To start an nREPL server within Blender:
+To start an nREPL server manually within Blender:
 
 ```python
 from basilisp_blender.nrepl import server_start
@@ -189,7 +224,7 @@ $ export BB_BLENDER_TEST_HOME="~/blender420"
 Then run the integration tests with
 
 ```bash
-$ poetry run pytest -m integration
+$ poetry run pytest --integration -v
 ```
 
 ### Installing Blender and the Development Package
@@ -203,7 +238,7 @@ $ poetry run python scripts/blender_install.py 4.2.0
 To install the development version of the package at the same location, use:
 
 ```bash
-$ poetry build                            # build the package
-$ poetry run python scripts/bb_install.py # install it in Blender
+$ poetry build                                    # build the package
+$ poetry run python scripts/bb_package_install.py # install it in Blender
 ```
 

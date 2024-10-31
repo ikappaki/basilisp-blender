@@ -1,0 +1,144 @@
+(ns basilisp-blender.utils
+  (:require [basilisp.set :as set]
+            [basilisp.stacktrace :as st]
+            [basilisp.string :as str]))
+
+(defmacro error-make [& details]
+  "Returns a list from the provided error ``details`` to represent an
+  error."
+  `(list ~@details))
+
+(defmacro error-add [error & details]
+  "Adds additional `details`` to he existing ``error`` list and
+  returns it."
+  (let [rdetails (reverse details)]
+    `(conj ~error ~@rdetails)))
+
+(defmacro error->str [error]
+  "Converts the ``error`` list to a human-readable string and returns
+  it. Includes stack traces for any embedded exceptions."
+  `(apply str (str/join " " ~error)
+          (let [excs# (filter (fn [e#]
+                                (instance? ~'Exception e#)) ~error)]
+            (when-not (empty? excs#)
+              (into ["\n\n--exception details--\n"]
+                    (for [exc# excs#]
+                      (str "\n" (with-out-str (st/print-stack-trace exc#)))))))))
+
+(defmacro with-eprotect [id-or-opts & body]
+  "Creates a try/catch wrapper around ``body`` that returns any
+exception as an `error` formatted with the `id` in ``id-or-opts``.
+
+ ``id-or-opts`` is either a printable object used as the `id`, or a map with the following keys
+
+ :id The `id`.
+
+ :on-err-str [opt] A function to call if an exception is caught, which
+ accepts the formated error message as only argument."
+  (let [opt-set #{:id :on-err-str}
+        {:keys [id on-err-str]}
+        (if (map? id-or-opts)
+          (if-not (contains? id-or-opts :id)
+            (throw (ValueError "id-or-otps should contain an :id key."))
+            (if-not (set/subset? (set (keys id-or-opts)) opt-set)
+              (throw (python/ValueError (str "id-or-opts should only contained supported option keys: " opt-set
+                                             " , but got " (keys id-or-opts))) )
+              id-or-opts))
+
+          {:id id-or-opts})]
+    `(try
+       (do
+         ~@body)
+       (catch python/Exception e
+         (let [err# (error-make ~id e)]
+           (when-let [es-fn# ~on-err-str]
+             (es-fn# (error->str err#)))
+           {:error err#})))))
+
+(defmacro class-make* [class-name class-and-interfaces fields & fns]
+  "Creates and returns a Python class with the given ``class-name``,
+  inheriting from the list of ``class-and-interfaces``. The class is
+  defined with the given ``fields`` and ``fns`` methods.
+
+  Each field in ``fields`` must include at least one of the following
+  metadata keys, otherwise, an error will be signaled:
+
+  :default The default value for the field.
+
+  :tag A type annotation for the field.
+
+  Within the ``fns`` methods, field names can be accessed directly as
+  functions by prefixing them with `-`, e.g., `(-field)`.
+
+  The ``fns`` parameter defines the methods of the class. Each method
+  should be specified in the following form:
+
+  (method-name1 docstring-maybe [args...] body)
+
+  Inside the method body, the self symbol is available to refer to the
+  instance of the class.
+
+  Methods can accept Python keyword arguments by specifying
+  the :kwargs option in the method's metadata. For example:
+
+  ^{:kwargs :collect} (method-name [args... {:as kwargs}])."
+  (let [;; The idea here is to create let bindings to the fields and
+        ;; functions required to implement the interfaces or new
+        ;; methods, and associate these bindigns to method names in
+        ;; `python/type`.
+        ;;
+        ;; (let [binding1 (let [field1 #(field1-getter) ...]
+        ;;                  (fn method-name1 ['self args...] body))
+        ;;       binding2 (let [field1 #(field1-getter) ...]
+        ;;                  (fn method-name2 ['self args...] body))
+        ;;       ...]
+        ;;  (python/type class-name (class-and-interfaces)
+        ;;    {"method-name1" bidning1, "method-name2" binding2, ...
+        ;;     "field1" field1-default ...
+        ;;     "__annotations__" {"field1" field1-tag ...}}))
+        fields-bindings (for [field fields]
+                          (let [{:keys [default tag] :as vmeta} (meta field)
+                                binding-name ]
+                            (if-not (or default tag)
+                              {:exception (str "Error: field`" field
+                                               "' should have a `default` or `tag` meta key defined.")}
+                              (cond-> {:field-to-getter-fn [(symbol (str "-" field)) `(fn [] (~(symbol (str ".-" field)) ~(symbol "self")))]}
+                                (contains? vmeta :default)
+                                (assoc :fname-to-binding-pairs [[(munge field) default]])
+                                (contains? vmeta :tag)
+                                (assoc :annotation [(munge field) tag])))))
+        fields-getters (map :field-to-getter-fn fields-bindings)
+        bindings-and-mappings
+        (for [f fns]
+          ;; single arity
+          (let [fmeta (meta f)
+                fname (first f)
+                fargs (second f)
+                [docstring fargs f] (if (string? fargs)
+                                    [fargs (nth f 2) (drop 1 f)]
+                                    [nil fargs f])
+                binding-name (gensym fname)
+                fn-def (with-meta `(fn ~fname ~(into ['self] fargs)
+                                     (let ~(into [] (apply concat fields-getters))
+                                       ~@(drop 2 f)))
+                         (cond-> fmeta
+                           docstring
+                           (assoc :doc docstring)))]
+            {:binding-to-fn-pairs [ [binding-name fn-def] ]
+             :fname-to-binding-pairs [[(munge fname) binding-name]]}))
+
+
+        bindings-and-mappings (concat fields-bindings bindings-and-mappings)
+        let-bindings (apply concat (map :binding-to-fn-pairs bindings-and-mappings))
+        fns-dict    (into {} (apply concat (map :fname-to-binding-pairs bindings-and-mappings)))
+        annotations (into {} (map :annotation) bindings-and-mappings)
+        fns-dict (cond-> fns-dict
+                   (not (empty? annotations))
+                   (assoc "__annotations__" annotations))
+        fns-dict (python/dict fns-dict)
+        exceptions (into [] (keep :exception fields-bindings))        ]
+    `(if-not (empty? ~exceptions)
+       (throw (python/ValueError (str/join "\n" ~exceptions)))
+       (let ~(into [] (apply concat let-bindings))
+         (python/type ~(str class-name) (python/tuple ~class-and-interfaces)
+                      ~fns-dict)))))

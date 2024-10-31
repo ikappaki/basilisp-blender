@@ -1,0 +1,80 @@
+(ns basilisp-blender.bpy-utils
+  (:require [basilisp.string :as str]
+            [basilisp-blender.nrepl-server :as ns]
+            [basilisp-blender.utils :as u])
+  (:import atexit
+           bpy
+           os.path
+           sys))
+
+(defn nrepl-server-start
+  "Starts the nrepl-server in async mode according to `opts`, using a
+  bpy timer to schedule any pending client work every 200ms.
+
+  `opts` is a map that can have the following keys
+
+  :host The interface address the server should be bound to. It
+  defaults to 127.0.0.1 if not given or empty.
+
+  :port The port number the server should listen to. It defaults to 0,
+  which indicates a random available port number.
+
+  :nrepl-port-dir The directory where the `.nrepl-port` file should be
+  created at. It defaults to the current working directory if not
+  given or empty.
+
+  It returns a map with the following keys
+
+  :error An error message in case the server could not be started
+
+  :host The address the server is bound to.
+
+  :nrepl-port-file The path to the `.nrepl-port` file with the port
+  number the server is listening to.
+
+  :port The port the server is listening to.
+
+  :shutdown! A function to shutdown the server and stop the bpy timer."
+  [{:keys [host port nrepl-port-dir interval-sec] :as opts
+    :or {port 0
+         interval-sec 0.2}}]
+  (binding [*out* sys/stdout]
+    (println :server-start :opts opts :host host :port port :nrepl-port-dir nrepl-port-dir :interval-sec interval-sec)
+
+    (let [host (if (or (nil? host) (empty? (str/trim host)))
+                           "127.0.0.1"
+                           host)
+          nrepl-port-dir (if (or (nil? nrepl-port-dir) (empty? (str/trim nrepl-port-dir)))
+                           "."
+                           nrepl-port-dir)]
+      (if (not (os.path/isdir nrepl-port-dir))
+        {:error (u/error-make [:nrepl-server-start :nrepl-port-dir-not-a-dir nrepl-port-dir])}
+
+        (let [{:keys [error work-fn shutdown-fn] :as ret}
+              (ns/start-server! {:async? true
+                                 :host host
+                                 :port port
+                                 :nrepl-port-file (os.path/join nrepl-port-dir ".nrepl-port")})]
+          (if error
+            (binding [*out* sys/stderr]
+              (println :server-start-error (u/error->str error))
+              {:error error})
+
+            (let [shutdown?* (volatile! false)
+                  shutdown! #(do (vreset! shutdown?* true)
+                                 (shutdown-fn))]
+              (atexit/register #(let [{:keys [error]} (shutdown-fn)]
+                                  (when error
+                                    (binding [*out* sys/stderr]
+                                      (println (u/error->str error))))))
+              (-> bpy/app .-timers (.register #(let [{:keys [error]} (work-fn)]
+                                                 (when error
+                                                   (binding [*out* sys/stderr]
+                                                     (println (u/error->str error))))
+                                                 (if @shutdown?*
+                                                   (println ::timer-shutdown host port)
+                                                   interval-sec))))
+
+              (-> (select-keys ret [:host :port :nrepl-port-file])
+                  (assoc :shutdown! shutdown!)))))))))
+

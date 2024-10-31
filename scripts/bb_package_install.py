@@ -38,7 +38,7 @@ evl.eval_str("""(import [pkg_resources :as pr])
         )
 
     result = subprocess.run(
-        [blender_path, "--background", "--python", temp_file.name],
+        [blender_path, "--background", "--factory-startup", "--python", temp_file.name],
         capture_output=True,
         text=True,
     )

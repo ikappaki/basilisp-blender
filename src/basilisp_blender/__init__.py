@@ -1,9 +1,11 @@
 """Initialize the Basilisp runtime environment."""
 
+import importlib
 import logging
 
 from basilisp import main as basilisp
 from basilisp.lang import compiler
+from basilisp.lang.util import munge
 
 COMPILER_OPTS = compiler.compiler_opts()
 basilisp.init(COMPILER_OPTS)
@@ -27,3 +29,8 @@ def log_level_set(level, filepath=None):
 
 
 # log_level_set(logging.DEBUG, "basilisp-blender.log")
+
+def control_panel_create():
+    """Initialises and displays the nREPL server UI control panel."""
+    ctrl_panel_mod = importlib.import_module(munge("basilisp-blender.control-panel"))
+    ctrl_panel_mod.nrepl_control_panel_create__BANG__()

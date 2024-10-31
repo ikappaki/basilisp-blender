@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "basilisp-blender"
-version = "0.1.0"
+version = "0.2.0b1"
 description = ""
 authors = ["ikappaki"]
 readme = "README.md"
@@ -10,11 +10,12 @@ packages = [
 
 [tool.poetry.dependencies]
 python = "^3.8"
-basilisp = "^0.1.0b2"
+basilisp = "^0.2.4"
 
 [tool.poetry.group.test.dependencies]
 pytest = "^8.3.1"
 nrepl-python-client = "^0.0.3"
+basilisp-pprint = "^0.1.0"
 
 
 [tool.poetry.group.dev.dependencies]
@@ -26,7 +27,3 @@ isort = "^5.13.2"
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
-
-[tool.pytest.ini_options]
-markers = ["integration: integration tests"]
-addopts = '-m "not integration"'
