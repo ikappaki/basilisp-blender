@@ -6,16 +6,6 @@
            os.path
            sys))
 
-(defn- class-register!
-  "Helper function to register a bpy class, with prior unregistering if
-  possible."
-  [class]
-  (try
-    (.unregister-class bpy/utils class)
-    (catch Exception e
-      nil))
-  (.register-class bpy/utils class))
-
 (defn- nrepl-url
   [host port]
   (str "nrepl://" host
@@ -253,7 +243,14 @@
   "Creates the nrepl server control panel in Blender, and returns its
   control interface.
 
-  The user settings are stored in the Scene as Properties."
+  The user settings are stored in the Scene as Properties.
+
+  It returns a map with the following entries
+
+  :ctrl The server control instance.
+
+  :destroy! A function that destroys the panel and settings, and
+  stops the server if it is running."
   []
   (let [ctrl (ctrl-make)
         settings-user
@@ -265,16 +262,29 @@
         panel
         (nrepl-control-panel-class-make ctrl)]
 
-
-    (class-register! settings-user)
+    (bpy.utils/register-class settings-user)
     (set! bpy.types.Scene/nrepl-settings-user (.PointerProperty bpy/props ** :type settings-user))
-    (class-register! operator)
-    (class-register! panel)
+    (bpy.utils/register-class operator)
+    (bpy.utils/register-class panel)
 
-    ctrl))
+    {:ctrl ctrl
+     :destroy! (fn nrepl-control-panel-destroy! []
+                 (binding [*out* sys/stdout]
+                   (doseq [cls [settings-user operator panel]]
+                     (try
+                       (bpy.utils/unregister-class cls)
+                       (catch Exception e
+                         nil)))
+                   (delattr bpy.types/Scene "nrepl_settings_user")
+                   (let [{:keys [result] :as _info} (ctrl-do! ctrl :info-get)
+                         {:keys [status]} result]
+                     (when (= status [:serving])
+                       (ctrl-do! ctrl :server-toggle!))))
+                 nil)}))
 
 (comment
-  (def ctrl2 (nrepl-control-panel-create))
-  @ctrl2
-;;
+  (def ctrl2 (nrepl-control-panel-create!))
+  @(:ctrl ctrl2)
+  ( (:destroy! ctrl2))
+  ;;
   )

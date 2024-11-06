@@ -18,19 +18,21 @@
                      (require '[basilisp-blender.control-panel :as p])
 
                      ;; this var will be used throughout all other tests
-                     (def ctrl-test (p/nrepl-control-panel-create!))
+                     (def ctrl-panel (p/nrepl-control-panel-create!))
+                     (def ctrl-test (:ctrl ctrl-panel))
+                     (def ctrl-destroy! (:destroy! ctrl-panel))
 
                      @ctrl-test)]
         (is (= {:res {:status [:ready]}} result)))
 
       (is (= {:result {:host nil :status [:ready] :port nil :port-dir nil}}
              (:res (but/with-client-eval!
-                     (p/ctrl-do! ctrl-test :info-get nil))))))
+                     (p/ctrl-do! ctrl-test :info-get))))))
 
     (testing "server start/stop without options"
       (let [{:keys [res] :as ret} (but/with-client-eval!
-                                    [(p/ctrl-do! ctrl-test :server-toggle! nil)
-                                     (p/ctrl-do! ctrl-test :info-get nil)])
+                                    [(p/ctrl-do! ctrl-test :server-toggle!)
+                                     (p/ctrl-do! ctrl-test :info-get)])
             [[toggle-state toggle-msg :as toggle] info] (map :result res)]
         (is (= :started toggle-state))
         (let [{:keys [port]} info
@@ -40,8 +42,8 @@
 
           ;; toggle -- server stop
           (let [{:keys [res] :as ret} (but/with-client-eval!
-                                        [(p/ctrl-do! ctrl-test :server-toggle! nil)
-                                         (p/ctrl-do! ctrl-test :info-get nil)])
+                                        [(p/ctrl-do! ctrl-test :server-toggle!)
+                                         (p/ctrl-do! ctrl-test :info-get)])
                 [[toggle-state toggle-msg :as toggle] info] (map :result res)]
             (is (= :stopped toggle-state) ret)
             (is (= (str "nrepl://127.0.0.1:" port) toggle-msg) toggle)
@@ -59,17 +61,17 @@
 
           ;; toggle -- server stop
           (let [{:keys [res] :as ret} (but/with-client-eval!
-                                        [(p/ctrl-do! ctrl-test :server-toggle! nil)
-                                         (p/ctrl-do! ctrl-test :info-get nil)])
+                                        [(p/ctrl-do! ctrl-test :server-toggle!)
+                                         (p/ctrl-do! ctrl-test :info-get)])
                 [[toggle-state toggle-msg :as toggle] info] (map :result res)]
             (is (= :stopped toggle-state))
             (is (= (str "nrepl://0.0.0.0:" port) toggle-msg) toggle)
             (is (= {:host nil :status [:ready] :port nil :port-dir nil} info))))))
 
     (testing "server port option"
-      (let [{:keys [res] :as ret} (but/with-client-eval!
-                                    [(p/ctrl-do! ctrl-test :server-toggle! {:port -1})
-                                     (p/ctrl-do! ctrl-test :info-get)])]
+      (let [{:keys [res] :as _ret} (but/with-client-eval!
+                                     [(p/ctrl-do! ctrl-test :server-toggle! {:port -1})
+                                      (p/ctrl-do! ctrl-test :info-get)])]
         (is [{:error
               (:server-make-error
                [:type-of
@@ -78,25 +80,33 @@
              {:result {:port nil, :host nil, :status [:ready], :port-dir nil}}] res)))
 
     (testing "server nrepl-port-dir option"
-      (let [{:keys [exc res] :as ret}
+      (let [{:keys [exc res] :as _ret}
             (but/with-client-eval!
               (import tempfile)
               (with [tmpdir (tempfile/TemporaryDirectory)]
                     {:actions
                      [(p/ctrl-do! ctrl-test :server-toggle! {:nrepl-port-dir tmpdir})
                       (p/ctrl-do! ctrl-test :info-get)
-                      (p/ctrl-do! ctrl-test :server-toggle! nil)]
+                      (p/ctrl-do! ctrl-test :server-toggle!)]
                      :tmpdir tmpdir}))
 
             {:keys [actions tmpdir]} res
 
             [[toggle-state] {:keys [port-dir]} [toggle-state2]]
-            (map :result actions)
+            (map :result actions)]
 
-            ]
         (is (nil? exc) exc)
         (is (= :started toggle-state))
         (is (= tmpdir port-dir) res)
-        (is (= :stopped toggle-state2))))))
+        (is (= :stopped toggle-state2))))
+
+    (testing "destroying panel"
+      (let [{:keys [res]} (but/with-client-eval!
+                                    [(p/ctrl-do! ctrl-test :server-toggle!)
+                                     (ctrl-destroy!)
+                                     (p/ctrl-do! ctrl-test :info-get)])
+            [[toggle-state] _ {:keys [status] :as _info}] (map :result res)]
+        (is (= :started toggle-state))
+        (is (= [:ready] status) _info)))))
 
 #_(tu/pp-code (panel-control-test))

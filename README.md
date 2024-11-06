@@ -5,51 +5,37 @@
 [Basilisp](https://github.com/basilisp-lang/basilisp) is a Python-based Lisp implementation that offers broad compatibility with Clojure. For more details, refer to the [documentation](https://basilisp.readthedocs.io/en/latest/index.html).
 
 ## Overview
-`basilisp-blender` is a Python library designed to facilitate the execution of Basilisp Clojure code within [Blender](https://www.blender.org/) and manage an nREPL server for interactive programming. 
+`basilisp-blender` is a Python library designed to facilitate the execution of Basilisp Clojure code within [Blender](https://www.blender.org/) and manage an nREPL server for interactive programming from within your editor of choice. 
 This library provides functions to evaluate Basilisp code from Blender's Python console, file or Text Editor and to start an nREPL server, allowing seamless integration and communication with Basilisp.
 
 ## Installation
-To install `basilisp-blender`, use `pip` from Blender's Python console:
+To install `basilisp-blender`, use `pip install` from Python console within the Blender's `Scripting` workspace:
 
 ```python
 import pip
 pip.main(['install', 'basilisp-blender'])
 ```
 
+Adjust the command as needed for your environment. For instance, use `-U` to upgrade to the latest version or `--user` to install to your user directory. For additional options, refer to [pip options](https://pip.pypa.io/en/stable/cli/pip_install/).
+
 ## Setup
 
 ### nREPL server control panel
 
-The library includes an nREPL server control panel accessible in Blender’s properties editor, under the Output panel (icon resembling a printer). From here, users can:
+The library includes an nREPL server control panel accessible in Blender’s Properties editor, under the Output panel (icon resembling a printer). From here, users can:
 - Start and stop the server.
 - Configure the local interface address and port.
-- Set the location of the `.nrepl-port` file for editor connections.
+- Specify your Basilisp project's root directory, where the `.nrepl-port` file will be saved for editor discovery.
 
+![nrepl cntrl panel output - ready](examples/nrepl-ctrl-panel-output-ready.png)
 
-![nrepl cntrl pnael output - ready](examples/nrepl-ctrl-panel-output-ready.png)
+![nrepl cntrl panel output - serving](examples/nrepl-ctrl-panel-output-serving.png)
 
-![nrepl cntrl pnael output - ready](examples/nrepl-ctrl-panel-output-serving.png)
+To enable the control panel, download the latest `nrepl_panel_addon_<version>.py` file from the [releases](https://github.com/ikappaki/basilisp-blender/releases) and install via`Edit`>`Preferences`>`Add-ons`>`Install From Disk`. 
 
-Note: The control panel does not appear automatically and must be activated manually via Blender's Python console within the `Scripting` workspace. To activate, run:
+The add-on should appear in list--be sure to check its box to activate it.
 
-```python
-import basilisp_blender
-basilisp_blender.control_panel_create()
-```
-
-To autoload the panel automatically at Blender’s startup, create a startup file in Blender's `<blender-version>/scripts/startup/` directory. For example, save the code below, say as `bb.py`, in that directory:
-
-```python
-import basilisp_blender
-basilisp_blender.control_panel_create()
-
-def register():
-    pass
-def unregister():
-    pass
-if __name__ == "__main__":
-    register()
-```
+![nrepl cntrl panel addon](examples/blender-nrepl-addon-install.png)
 
 ## Usage
 ### Evaluating Basilisp Code
@@ -242,4 +228,4 @@ This project is licensed under the Eclipse Public License 2.0. See the [LICENSE]
 
 # Acknowledgments
 
-The nREPL server is a spin-off of [Basilisp](https://github.com/basilisp-lang/basilisp)'s `basilisp.contrib.nrepl-server` namespace.
+The nREPL server is a spin-off of [Basilisp](https://github.com/basilisp-lang/basilisp)'s `basilisp.contrib.nrepl-server`.
