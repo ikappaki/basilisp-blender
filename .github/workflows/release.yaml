@@ -32,7 +32,7 @@ jobs:
     - name: Build package
       run: poetry build && python scripts/bb_addon_create.py
     - name: Upload release artifacts
-      run: gh release upload ${{ github.event.release.tag_name }} dist/*.{tar.gz,whl} dist/nrepl_panel_addon*.py
+      run: gh release upload ${{ github.event.release.tag_name }} dist/*.{tar.gz,whl} out/nrepl_panel_addon*.py
       env:
         GH_TOKEN: ${{ github.token }}
     - name: Publish package distributions to PyPI
