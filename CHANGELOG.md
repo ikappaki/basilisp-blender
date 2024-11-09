@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.3.0
+
+- Made the nREPL control panel destructible.
+- Released a Blender Add-on to display the nREPL control panel.
+
 ## 0.2.0
 
 - Added async server interface support in `start-server!` with a client work abstraction.
