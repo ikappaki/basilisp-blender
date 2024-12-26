@@ -9,35 +9,73 @@
 This library provides functions to evaluate Basilisp code from Blender's Python console, file or Text Editor and to start an nREPL server, allowing seamless integration and communication with Basilisp.
 
 ## Installation
-To install `basilisp-blender`, use `pip install` from Python console within the Blender's `Scripting` workspace:
 
-```python
-import pip
-pip.main(['install', 'basilisp-blender'])
+For Blender `>= 4.2.0`, download the `basilisp_blender_extension-<version>.zip` extension file from the [releases](https://github.com/ikappaki/basilisp-blender/releases) page.
+Install in Blender by navigated to:
+
+`Edit > Preferences > Get Extensions > Install From Disk...`
+
+Alternatively, you can also install it via the command line:
+
+```shell
+$ blender[.exe] --command extension install-file basilisp_blender_extension-<version>.zip -r user_default -e
 ```
 
-Adjust the command as needed for your environment. For instance, use `-U` to upgrade to the latest version or `--user` to install to your user directory. For additional options, refer to [pip options](https://pip.pypa.io/en/stable/cli/pip_install/).
+After installation, the extension will appear as activated under the `Get Extensions` tab in Preferences.
 
-## Setup
+## Usage
 
 ### nREPL server control panel
 
 The library includes an nREPL server control panel accessible in Blender’s Properties editor, under the Output panel (icon resembling a printer). From here, users can:
 - Start and stop the server.
 - Configure the local interface address and port.
-- Specify your Basilisp project's root directory, where the `.nrepl-port` file will be saved for editor discovery.
+- Specify your `Basilisp Project Root Directory`, where the `.nrepl-port` file will be saved for editor discovery.
 
 ![nrepl cntrl panel output - ready](examples/nrepl-ctrl-panel-output-ready.png)
 
 ![nrepl cntrl panel output - serving](examples/nrepl-ctrl-panel-output-serving.png)
 
-To enable the control panel, download the latest `nrepl_panel_addon_<version>.py` file from the [releases](https://github.com/ikappaki/basilisp-blender/releases) and install via`Edit`>`Preferences`>`Add-ons`>`Install From Disk`. 
+The `Basilisp Project Root Directory` is the location where your Basilisp code resides.
+It is recommended to include an empty `basilisp.edn` file in the root directory to indicate it is a Basilisp project.
 
-The add-on should appear in list--be sure to check its box to activate it.
+Example structure:
 
-![nrepl cntrl panel addon](examples/blender-nrepl-addon-install.png)
+```
+<project root directory>
+├── .nrepl-port    (N)
+├── basilisp.edn   (B)
+├── yourcode.lpy   (1)
+```
 
-## Usage
+🄝 Created by the nREPL server upon startup.
+
+🄑 An empty file to indicate to Clojure-enabled editors that this is a Basilisp Project.
+
+① Your Basilisp code.
+
+#### Connecting through your Editor
+
+> [!NOTE]
+> While it’s not necessary to open the project in your editor to connect to the nREPL server, doing so simplifies setup. 
+
+Open the `basilisp.edn` file to enable Clojure-specific features in your editor.
+Both [Emacs/CIDER](https://docs.cider.mx/cider/platforms/basilisp.html) and [VSCode/Calva](https://calva.io/basilisp/) offer explicit support for Basilisp.
+If you are using a different Editor, refer to its documentation for instructions on connecting to a running nREPL server.
+
+#### CIDER (Emacs)
+
+1. Run `M-x cider-connect-clj`
+2. Select `localhost`.
+3. Select the `<project-dir>:<port number>` option.
+
+#### Calva (VSCode)
+1. Press `Ctrl-Alt-P` to open the Command Palette.
+2. Select `Calva: Connect to a Running REPL Server, in your project`>`basilisp`.
+3. The editor will automatically find the port using `.nrepl-port`.
+
+The Editor should now connect seamlessly to the nREPL server.
+
 ### Evaluating Basilisp Code
 
 #### From a Code String
@@ -156,6 +194,43 @@ Here is an example of Basilisp code to create a torus pattern using the bpy Blen
 
 ![torus pattern example img](examples/torus-pattern.png)
 
+## Manual Installation and Setup
+
+The library and the nREPL control panel can be manually installed to support Blender versions earlier than 4.2.
+
+To install the `basilisp-blender` library, use `pip install` from Python console within the Blender's `Scripting` workspace:
+
+```python
+import pip
+pip.main(['install', 'basilisp-blender'])
+```
+
+Adjust the command as needed for your environment. For instance, use `-U` to upgrade to the latest version or `--user` to install to your user directory. For additional options, refer to [pip options](https://pip.pypa.io/en/stable/cli/pip_install/).
+
+Some Blender distribution use a "managed" Python environment, which restricts package installation to the standard directories. To identify a suitable intsallation path, inspect Blender's Python `sys.path` list:
+
+```python
+>>> import sys
+>>> sys.path
+['/usr/share/blender/scripts/startup', '/usr/share/blender/scripts/modules', '/usr/lib/python312.zip',
+ '/usr/lib/python3.12', '/usr/lib/python3.12/lib-dynload', '/usr/local/lib/python3.12/dist-packages',
+ '/usr/lib/python3/dist-packages', '/usr/share/blender/scripts/freestyle/modules',
+ '/usr/share/blender/scripts/addons/modules', '/home/ikappaki/.config/blender/4.0/scripts/addons/modules',
+ '/usr/share/blender/scripts/addons', '/home/ikappaki/.config/blender/4.0/scripts/addons']
+```
+
+The most suitable directory is likely `scripts/addons/modules`. In the example provided, this corresponds to `~/.config/blender/4.0/scripts/addons/modules`.
+
+Use this path as a `--target` directory when running `pip install`:
+
+```python
+>>> import pip
+>>> pip.main(['install', 'basilisp_blender', '--target', '/home/ikappaki/.config/blender/4.0/scripts/addons/modules'])
+...
+Successfully installed attrs-24.2.0 basilisp-0.2.4 basilisp_blender-0.3.0 immutables-0.21 prompt-toolkit-3.0.48 pyrsistent-0.20.0 typing-extensions-4.12.2 wcwidth-0.2.13
+0
+```
+
 # Troubleshooting
 
 If you encounter unexplained errors, enable `DEBUG` logging and save the output to a file for inspection. For example:
@@ -207,6 +282,24 @@ Then run the integration tests with
 $ poetry run pytest --integration -v
 ```
 
+### Generating the extension
+
+Set the `$BB_BLENDER_TEST_HOME` environment variable to point to your Blender installation directory:
+
+
+```bash
+$ export BB_BLENDER_TEST_HOME="~/blender420"
+# or on MS-Windows
+> $env:BB_BLENDER_TEST_HOME="c:\local\blender420"
+```
+
+Run the script to generate the extension.
+Include `--and-install` to install it:
+
+```bash
+$ poetry run basilisp run scripts/bb_extension_create.lpy --and-install
+```
+
 ### Installing Blender and the Development Package
 
 To download and install Blender in the directory specified by `$BB_BLENDER_TEST_HOME`, use:
@@ -222,9 +315,22 @@ $ poetry build                                    # build the package
 $ poetry run python scripts/bb_package_install.py # install it in Blender
 ```
 
+To enable the control panel, download the latest `nrepl_panel_addon_<version>.py` file from the [releases](https://github.com/ikappaki/basilisp-blender/releases) and install via`Edit`>`Preferences`>`Add-ons`>`Install From Disk`. 
+
+The add-on should appear in list--be sure to check its box to activate it.
+
+![nrepl cntrl panel addon](examples/blender-nrepl-addon-install.png)
+
+
 # License
 
 This project is licensed under the Eclipse Public License 2.0. See the [LICENSE](LICENSE) file for details.
+
+## Extension License
+
+The extension is licensed under the GNU General Public License v3.0.
+
+See the [LICENSE_EXTENSION](LICENSE_EXTENSION) file for details.
 
 # Acknowledgments
 

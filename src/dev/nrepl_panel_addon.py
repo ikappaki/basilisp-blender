@@ -1,4 +1,3 @@
-from basilisp_blender import control_panel_create
 bl_info = {
     "name"    : "Basilisp nREPL Server Control Panel",
     "description" : "Control the nREPL server from the Properties Editor>Output panel",
@@ -9,6 +8,9 @@ bl_info = {
     "doc_url" : "https://github.com/ikappaki/basilisp-blender",
     "category": "Development",
 }
+
+# >>>###<<< Marker: Start Of Code
+from basilisp_blender import control_panel_create
 _DESTROY_FN = None
 def register():
     global _DESTROY_FN

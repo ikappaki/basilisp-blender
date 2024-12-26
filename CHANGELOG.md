@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Package as a Blender Extension (#6).
+
 ## 0.3.0
 
 - Made the nREPL control panel destructible.

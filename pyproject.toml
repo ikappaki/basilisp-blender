@@ -8,9 +8,12 @@ packages = [
     { include = "basilisp_blender", from = "src" },
 ]
 
+[project.urls]
+Homepage = "https://github.com/ikappaki/basilisp-blender"
+
 [tool.poetry.dependencies]
-python = "^3.8"
-basilisp = "^0.2.4"
+python = "^3.9"
+basilisp = ">=0.3.5"
 
 [tool.poetry.group.test.dependencies]
 pytest = "^8.3.1"
@@ -23,7 +26,8 @@ pytest-xvfb = "^3.0.0"
 requests = "^2.32.3"
 black = "^24.4.2"
 isort = "^5.13.2"
+tomli-w = "^1.1.0"
 
 [build-system]
-requires = ["poetry-core"]
+requires = ["poetry-core<2"]
 build-backend = "poetry.core.masonry.api"

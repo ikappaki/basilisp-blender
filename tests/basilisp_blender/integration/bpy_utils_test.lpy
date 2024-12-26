@@ -257,13 +257,17 @@
   [& body]
   (let [[requires-imports sexps] (tu/requires-imports-split body)
         body `((require '~'[basilisp.edn :as edn]
+                        '~'[basilisp.stacktrace :as strace]
                         '~'[basilisp.walk :as w])
                ~@requires-imports
                (let [res# (do ~@sexps)
                      res# (w/postwalk (fn [x#] (if (or (coll? x#) (string? x#) (number? x#) (keyword? x#)
                                                        (nil? x#))
                                                  x#
-                                                 [:type-of (str (type x#)) (str x#)]))
+
+                                                 (cond-> [:type-of (str (type x#)) (str x#)]
+                                                   (instance? python/Exception x#)
+                                                   (conj (with-out-str (strace/print-stack-trace x#))))))
                                       res#)]
                  res#))
 
