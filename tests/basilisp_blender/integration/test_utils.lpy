@@ -8,7 +8,6 @@
            tests.basilisp_blender.integration.integ_utils)
   (:require [basilisp.contrib.bencode :as bc]
             [basilisp.edn :as edn]
-            [basilisp.stacktrace :as strace]
             [basilisp.string :as str]
             [basilisp.test :refer [deftest are is testing]]
             [basilisp-pprint.pprint :as pp]))
@@ -118,6 +117,7 @@
   the result is guaranteed to be EDN encodeable."
   (let [[requires-imports sexps] (requires-imports-split sexps)
         sexps `((require '~'[basilisp.edn :as edn]
+                         '~'[basilisp.stacktrace :as strace]
                          '~'[basilisp.walk :as w])
                 (import ~'io)
                 ~@requires-imports
