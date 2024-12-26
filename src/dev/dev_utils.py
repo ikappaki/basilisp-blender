@@ -2,6 +2,7 @@
 import os
 import platform
 import shutil
+import subprocess
 import time
 
 ENV_BLENDER_HOME_ = "BB_BLENDER_TEST_HOME"
@@ -57,3 +58,11 @@ def blender_exec_path_get():
     ), f":error :blender-exec-not-found-in {ENV_BLENDER_HOME_}={blender_home_abs}"
     print(f":blender-found-at {ENV_BLENDER_HOME_}={blender_home_abs} :exec {exec_path}")
     return exec_path
+
+def basilisp_blender_wheel_path_get():
+    "Returns the path where the basilisp blender wheel will be built."
+    result = subprocess.run(["poetry", "version"], capture_output=True, text=True)
+
+    bb_version = result.stdout.strip().replace("-", "_").replace(" ", "-")
+    wheel_path = f"dist/{bb_version}-py3-none-any.whl"
+    return wheel_path

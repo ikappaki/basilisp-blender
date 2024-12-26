@@ -1,0 +1,129 @@
+;; This script should be invoked from the project root directory.
+;;
+;; Consults poetry for the project's version and dependencies,
+;; downloads the dependencies from PyPI, and generates the extension
+;; `basilisp_blender_extension-<version>.zip` containing:
+;;
+;; - basilisp-blender wheel and its wheel dependencies.
+;; - manifest file,
+;; - nrepl_pannel_addon as the extension's init file.
+
+(import [dev.dev_utils :as du]
+        os
+        re
+        [requests :as r]
+        shutil
+        [tomli_w :as tw])
+(require '[basilisp.process :as proc]
+         '[basilisp.string :as str])
+
+(def poetry-name-version (-> (proc/exec  "poetry" "version")
+                             str/trim))
+(def poetry-version      (-> poetry-name-version
+                             (str/split " ")
+                             second))
+(def blender-path        (du/blender-exec-path-get))
+
+
+(def ext-dir           "extension")
+(def ext-manifest-file (os.path/join ext-dir "blender_manifest.toml"))
+(def ext-init-file     (os.path/join ext-dir "__init__.py"))
+(def ext-wheels-dir    (os.path/join ext-dir "wheels"))
+(def ext-zip-path      (os.path/join ext-dir  (str "basilisp_blender_extension-" poetry-version ".zip")))
+
+(def deps-expected     ["attrs" "basilisp" "immutables" "prompt-toolkit"
+                        "pyrsistent" "typing-extensions" "wcwidth"])
+(def deps-py-versions  ["py2.py3" "py3" "cp311" "cp312" "cp313"])
+(def pypi-url          "https://pypi.org/pypi")
+
+(def manifest          {:schema_version "1.0.0"
+                        :id "basilisp_blender_extension"
+                        :name "Basilisp Blender Extension"
+                        :tagline "Basilisp, a Clojure compatible Lisp running on the Python VM"
+                        :maintainer "ikappaki"
+                        :type "add-on"
+                        :website "https://github.com/ikappaki/basilisp-blender"
+                        :blender_version_min "4.2.0"
+                        :license ["SPDX:GPL-3.0-or-later"]
+                        :platforms ["windows-x64", "macos-arm64", "linux-x64"]})
+
+(def init-file-content (->> (slurp "src/dev/nrepl_panel_addon.py")
+                            (str/split-lines)
+                            (drop-while #(not (str/includes? % ">>>###<<<")))
+                            rest
+                            (str/join "\n")))
+
+(def extension-version (->> poetry-version
+                            (re/match #"^\d+(\.\d+)*")
+                            .group))
+(println :poetry-version poetry-version :extension-version extension-version)
+
+(def bb-wheel-path     (du/basilisp-blender-wheel-path-get))
+
+(def project-deps     (-> (proc/exec  "poetry" "show" "--only" "main")
+                          str/trim
+                          (str/split "\n")
+                          (->> (map #(take 2 (str/split % #" +" 3)))
+                               (into {}))))
+(assert (= (set (keys project-deps)) (set deps-expected)))
+
+(defn wheel-info-get
+  "Retrieve the urls metadata info for PACKAGE and VERSION from the
+  `pypi-url` json endpoint."
+  [package version]
+  (let [req (r/get (str pypi-url "/" package "/" version "/json"))]
+    (-> req
+        .json
+        py->lisp
+        :urls
+        (->> (filter (fn [entry] (and (= (:packagetype entry) "bdist_wheel"))))))))
+
+#_(wheel-info-get "wcwidth" "0.2.13")
+
+(when (os.path/exists ext-dir)
+  (println :recreating :ext-dir ext-dir)
+  (shutil/rmtree ext-dir))
+(os/makedirs ext-wheels-dir ** :exist-ok true)
+
+(println :bb-wheel-copying bb-wheel-path :to ext-wheels-dir)
+(shutil/copy bb-wheel-path ext-wheels-dir)
+
+(println :downloading-wheels project-deps)
+(doseq [[dep version]  project-deps]
+  (println \tab :processing :dep dep :version version)
+  (let [wheels-bin (wheel-info-get dep version)
+        wheels-bin-py (filter (fn [entry]
+                                (some #(= (:python_version entry) %) deps-py-versions)) wheels-bin)
+        urls (map :url wheels-bin-py)]
+    (assert (seq urls) dep)
+    (doseq [url urls]
+      (let [nm (os.path/basename url)
+            out-path (os.path/join ext-wheels-dir nm)
+            wheel (.-content (r/get url))]
+        (println "\t\t" :downloading nm :to out-path)
+        (with [file (open out-path "wb")]
+              (.write file wheel))))))
+
+(def wheels (map #(str "wheels/" (.-name %))
+                 (seq (os/scandir ext-wheels-dir))))
+(assert (pos? (count wheels)))
+
+(println :manifest-creating-at ext-manifest-file)
+(spit ext-manifest-file (tw/dumps (lisp->py (assoc manifest
+                                                   :version extension-version
+                                                   :wheels wheels))))
+
+
+(println :init-creating-at ext-manifest-file)
+(spit ext-init-file init-file-content)
+
+(println :extension-creating-at ext-zip-path)
+(let [validate [blender-path "--command" "extension" "validate" ext-dir]
+      build [blender-path "--command" "extension" "build" "--source-dir" ext-dir "--output-filepath" ext-zip-path]]
+  (println \tab :validate-cmd (str/join " " validate))
+  (apply proc/exec validate)
+  (println \tab :build-cmd (str/join " " build))
+  (apply proc/exec build))
+
+(assert (os.path/exists ext-zip-path))
+(println :extension-built-as ext-zip-path)
