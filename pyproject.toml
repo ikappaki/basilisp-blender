@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "basilisp-blender"
-version = "0.3.1a24"
+version = "0.3.1a25"
 description = ""
 authors = ["ikappaki"]
 readme = "README.md"

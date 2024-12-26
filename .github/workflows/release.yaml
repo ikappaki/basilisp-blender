@@ -33,7 +33,7 @@ jobs:
         python -m pip install --upgrade pip
         pip install poetry
     - name: Build package
-      run: poetry build && python scripts/bb_addon_create.py
+      run: poetry install && poetry build && poetry run python scripts/bb_addon_create.py
 
     - name: Restore Blender from cache
       id: cache-blender
@@ -55,7 +55,7 @@ jobs:
         key: ${{ steps.cache-blender.outputs.cache-primary-key }}
 
     - name: Build extension
-      run: poetry install && poetry run basilisp run scripts/bb_extension_create.lpy
+      run: poetry run basilisp run scripts/bb_extension_create.lpy
 
     - name: Upload release artifacts
       run: gh release upload ${{ github.event.release.tag_name }} dist/*.{tar.gz,whl} out/nrepl_panel_addon*.py extension/*.zip
