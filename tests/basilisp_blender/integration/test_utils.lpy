@@ -8,6 +8,7 @@
            tests.basilisp_blender.integration.integ_utils)
   (:require [basilisp.contrib.bencode :as bc]
             [basilisp.edn :as edn]
+            [basilisp.stacktrace :as strace]
             [basilisp.string :as str]
             [basilisp.test :refer [deftest are is testing]]
             [basilisp-pprint.pprint :as pp]))
@@ -135,7 +136,10 @@
                       res# (w/postwalk (fn [x] (if (or (coll? x) (string? x) (number? x) (keyword? x)
                                                        (nil? x))
                                                  x
-                                                 [:type-of (str (type x)) (str x)]))
+
+                                                 (cond-> [:type-of (str (type x)) (str x)]
+                                                   (instance? python/Exception x)
+                                                   (conj (with-out-str (strace/print-stack-trace x))))))
                                        res#)
                       ;; this shouldn't error because of the walk
                       ;; above.
@@ -203,7 +207,7 @@
       (let [result (read-result (test-fn '([1 (python/Exception "an exc")])))]
         (is (= {:errstr "",
                 :res
-                [1 [:type-of "<class 'Exception'>" "Exception('an exc')"]],
+                [1 [:type-of "<class 'Exception'>" "Exception('an exc')" "Exception: an exc\n"]],
                 :outstr ""}
                result)))
 
