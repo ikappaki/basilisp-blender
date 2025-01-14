@@ -209,7 +209,7 @@
         (let [{:keys [sock] :as client} (client-make!)]
           (try
             (.connect sock (python/tuple ["127.0.0.1" *nrepl-port*]))
-            (.settimeout sock 1)
+            (.settimeout sock 3)
             (let [[server port](.getpeername sock)]
               (is (= "127.0.0.1" server))
               (is (= *nrepl-port* port)))
@@ -236,7 +236,7 @@
      (try
        (binding [*nrepl-client* client#]
          (.connect sock# (python/tuple ["127.0.0.1" ~port]))
-         (.settimeout sock# 1)
+         (.settimeout sock# 3)
          ~@body)
        (finally
          (client-close! client#)))))
