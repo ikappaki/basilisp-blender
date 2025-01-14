@@ -1,0 +1,245 @@
+;; This script should be invoked from the project root directory.
+;;
+;; Consults poetry for the project's version and dependencies,
+;; downloads the dependencies from PyPI, and generates the extension
+;; `basilisp_blender_extension-<version>.zip` containing:
+;;
+;; - basilisp-blender wheel and its wheel dependencies.
+;; - manifest file,
+;; - LICENSE file,
+;; - nrepl_pannel_addon as the extension's init file.
+;;
+;; Command line options:
+;; --and-intsall: also install the extension.
+
+(import argparse
+        [dev.dev_utils :as du]
+        os
+        re
+        [requests :as r]
+        shutil
+        [tomli_w :as tw])
+(require '[basilisp.process :as proc]
+         '[basilisp.string :as str])
+
+#_(os.environ/update {"BB_BLENDER_TEST_HOME" "~/blender420"})
+#_(os.environ/get "BB_BLENDER_TEST_HOME")
+
+(def parser (argparse/ArgumentParser))
+(.add-argument parser "--and-install" **
+               :action "store_true" :help "also install the extension")
+(def args (.parse-args parser (or *command-line-args* [])))
+
+(def poetry-name-version (-> (proc/exec  "poetry" "version")
+                             str/trim))
+(def poetry-version      (-> poetry-name-version
+                             (str/split " ")
+                             second))
+(def blender-path        (du/blender-exec-path-get))
+
+
+(def ext-dir           "extension")
+(def ext-manifest-file (os.path/join ext-dir "blender_manifest.toml"))
+(def ext-license-file  (os.path/join ext-dir "LICENSE"))
+(def ext-init-file     (os.path/join ext-dir "__init__.py"))
+(def ext-wheels-dir    (os.path/join ext-dir "wheels"))
+(def ext-zip-path      (os.path/join ext-dir (str "basilisp_blender_extension-" poetry-version ".zip")))
+
+(def packages-info
+  {"attrs"
+   {:url "https://github.com/python-attrs/attrs"
+    :license "https://raw.githubusercontent.com/python-attrs/attrs/refs/heads/main/LICENSE"
+    :dependent "basilisp"
+    :source :poetry}
+   "basilisp"
+   {:url "https://github.com/basilisp-lang/basilisp"
+    :license "https://raw.githubusercontent.com/basilisp-lang/basilisp/refs/heads/main/LICENSE"
+    :source :poetry}
+   "basilisp-blender"
+   {:url "https://github.com/ikappaki/basilisp-blender"
+    :license "https://raw.githubusercontent.com/ikappaki/basilisp-blender/refs/heads/main/LICENSE"
+    :src :extension}
+   "basilisp-blender-extension"
+   {:url "https://github.com/ikappaki/basilisp-blender"
+    :license "https://www.gnu.org/licenses/gpl-3.0.txt"}
+   "immutables"
+   {:url "https://github.com/MagicStack/immutables"
+    :license "https://raw.githubusercontent.com/MagicStack/immutables/refs/heads/master/LICENSE"
+    :dependent "basilisp"
+    :source :poetry}
+   "prompt-toolkit"
+   {:url "https://github.com/prompt-toolkit/python-prompt-toolkit"
+    :license "https://raw.githubusercontent.com/prompt-toolkit/python-prompt-toolkit/refs/heads/master/LICENSE"
+    :dependent "basilisp"
+    :source :poetry}
+   "pyrsistent"
+   {:url "https://github.com/tobgu/pyrsistent/"
+    :license "https://raw.githubusercontent.com/tobgu/pyrsistent/refs/heads/master/LICENSE.mit"
+    :dependent "basilisp"
+    :source :poetry}
+   "typing-extensions"
+   {:url "https://github.com/python/typing_extensions"
+    :license "https://raw.githubusercontent.com/python/typing_extensions/refs/heads/main/LICENSE"
+    :dependent "basilisp"
+    :source :poetry}
+   "wcwidth"
+   {:url "https://github.com/jquast/wcwidth"
+    :license "https://raw.githubusercontent.com/jquast/wcwidth/refs/heads/master/LICENSE"
+    :dependent "basilisp"
+    :source :poetry}})
+
+(def deps-expected     (keep (fn [[k v]] (when (= (:source v) :poetry) k)) packages-info))
+(def deps-py-versions  ["py2.py3" "py3" "cp311" "cp312" "cp313"])
+(def pypi-url          "https://pypi.org/pypi")
+
+(def manifest          {:schema_version "1.0.0"
+                        :id "basilisp_blender_extension"
+                        :name "Basilisp Blender Extension"
+                        :tagline "Basilisp, a Clojure compatible Lisp running on the Python VM"
+                        :maintainer "ikappaki"
+                        :type "add-on"
+                        :website "https://github.com/ikappaki/basilisp-blender"
+                        :blender_version_min "4.2.0"
+                        :license ["SPDX:GPL-3.0-or-later"]
+                        :platforms ["windows-x64", "macos-arm64", "linux-x64"]})
+
+(def init-file-content (->> (slurp "src/dev/nrepl_panel_addon.py")
+                            (str/split-lines)
+                            (drop-while #(not (str/includes? % ">>>###<<<")))
+                            rest
+                            (str/join "\n")))
+
+(def extension-version (->> poetry-version
+                            (re/match #"^\d+(\.\d+)*")
+                            .group))
+(println :poetry-version poetry-version :extension-version extension-version)
+
+(def bb-wheel-path     (du/basilisp-blender-wheel-path-get))
+
+(def project-deps     (-> (proc/exec  "poetry" "show" "--only" "main")
+                          str/trim
+                          (str/split "\n")
+                          (->> (map #(take 2 (str/split % #" +" 3)))
+                               (into {}))))
+(assert (= (set (keys project-deps)) (set deps-expected)))
+
+(defn wheel-info-get
+  "Retrieve the urls metadata info for PACKAGE and VERSION from the
+  `pypi-url` json endpoint."
+  [package version]
+  (let [req (r/get (str pypi-url "/" package "/" version "/json"))]
+    (-> req
+        .json
+        py->lisp
+        :urls
+        (->> (filter (fn [entry] (and (= (:packagetype entry) "bdist_wheel"))))))))
+
+#_(wheel-info-get "wcwidth" "0.2.13")
+
+(when (os.path/exists ext-dir)
+  (println :recreating :ext-dir ext-dir)
+  (shutil/rmtree ext-dir))
+(os/makedirs ext-wheels-dir ** :exist-ok true)
+
+(println :bb-wheel-copying bb-wheel-path :to ext-wheels-dir)
+(shutil/copy bb-wheel-path ext-wheels-dir)
+
+(println :downloading-wheels project-deps)
+(doseq [[dep version]  project-deps]
+  (println \tab :processing :dep dep :version version)
+  (let [wheels-bin (wheel-info-get dep version)
+        wheels-bin-py (filter (fn [entry]
+                                (some #(= (:python_version entry) %) deps-py-versions)) wheels-bin)
+        urls (map :url wheels-bin-py)]
+    (assert (seq urls) dep)
+    (doseq [url urls]
+      (let [nm (os.path/basename url)
+            out-path (os.path/join ext-wheels-dir nm)
+            wheel (.-content (r/get url))]
+        (println "\t\t" :downloading nm :to out-path)
+        (with [file (open out-path "wb")]
+              (.write file wheel))))))
+
+(def wheels (map #(str "wheels/" (.-name %))
+                 (seq (os/scandir ext-wheels-dir))))
+(assert (pos? (count wheels)))
+
+(println :manifest-creating-at ext-manifest-file)
+(spit ext-manifest-file (tw/dumps (lisp->py (assoc manifest
+                                                   :version extension-version
+                                                   :wheels wheels))))
+
+
+(defn cmd-exec [& cmd]
+  (println :cmd/exec (str/join " " cmd))
+  (let [proc (apply proc/start cmd)
+        [out err] (proc/communicate proc)
+        retcode (.-returncode proc)]
+    (println :cmd/stdout)
+    (println  (slurp out))
+    (println :cmd/stderr)
+    (println (slurp err))
+    (println :cmd/retcode retcode)
+    (assert (zero? retcode) retcode)
+    retcode))
+
+(defn url-download [url]
+  (let [req (r/get url)]
+    (assert (= (.-status-code req) 200) url)
+    (.-text req)))
+
+(println :license-creating-at ext-license-file)
+(with [file (open ext-license-file ** :mode "w")]
+      (let [bas-deps (filter (fn [[k v]] (= (:dependent v) "basilisp")) packages-info)]
+        (.write file (str "The extension is distributed under GPLv3, with bundled wheel dependencies maintaining their original licences as specified\n\n"
+                          (str/join "\n" (concat ["- basilisp-blender-extension"
+                                              "  - basilisp-blender"
+                                              "  - basilisp"]
+                                             (for [[dep {:keys [url]}] (sort-by key bas-deps)]
+                                               (str "    - " dep))))))
+
+        (doseq [[dep {:keys [license url]}] (->> (sort-by key packages-info)
+                                                 (sort-by #(let [k (key %)]
+                                                             (cond
+                                                               (= k "basilisp-blender-extension")
+                                                               0
+                                                               (= k "basilisp-blender")
+                                                               1
+                                                               (= k "basilisp")
+                                                               2
+                                                               :else
+                                                               3))))]
+          (let [dashes (* "-" (+ 2 (count dep)))]
+            (.write file (str "\n\n" dashes "\n "
+                              dep " - " url
+                              "\n" dashes "\n\n"
+                              (url-download license)))))))
+(cmd-exec "diff" ext-license-file "LICENSE_EXTENSION")
+
+(println :init-creating-at ext-manifest-file)
+(spit ext-init-file init-file-content)
+
+(println :extension-creating-at ext-zip-path)
+(let [validate [blender-path "--command" "extension" "validate" ext-dir]
+      build [blender-path "--command" "extension" "build" "--source-dir" ext-dir "--output-filepath" ext-zip-path]]
+  (println \tab :validate-cmd (str/join " " validate))
+  (apply proc/exec validate)
+  (println \tab :build-cmd (str/join " " build))
+  (apply proc/exec build))
+
+(assert (os.path/exists ext-zip-path))
+(println :extension-built-as ext-zip-path)
+
+(when (.-and-install args)
+  (println :installing ext-zip-path)
+  (let [install [blender-path "--command" "extension" "install-file" ext-zip-path "-r" "user_default" "-e"]]
+    (apply cmd-exec install)
+    (let [proc (apply proc/start install)
+          [out err] (proc/communicate proc)
+          retcode (.-returncode proc)]
+
+      (println :stdout (slurp out))
+      (println :stderr (slurp err))
+      (assert (zero? retcode) retcode)
+      (println :extension-installed))))
+

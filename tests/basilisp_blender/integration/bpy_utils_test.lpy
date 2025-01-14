@@ -209,7 +209,7 @@
         (let [{:keys [sock] :as client} (client-make!)]
           (try
             (.connect sock (python/tuple ["127.0.0.1" *nrepl-port*]))
-            (.settimeout sock 1)
+            (.settimeout sock 3)
             (let [[server port](.getpeername sock)]
               (is (= "127.0.0.1" server))
               (is (= *nrepl-port* port)))
@@ -236,7 +236,7 @@
      (try
        (binding [*nrepl-client* client#]
          (.connect sock# (python/tuple ["127.0.0.1" ~port]))
-         (.settimeout sock# 1)
+         (.settimeout sock# 3)
          ~@body)
        (finally
          (client-close! client#)))))
@@ -257,13 +257,17 @@
   [& body]
   (let [[requires-imports sexps] (tu/requires-imports-split body)
         body `((require '~'[basilisp.edn :as edn]
+                        '~'[basilisp.stacktrace :as strace]
                         '~'[basilisp.walk :as w])
                ~@requires-imports
                (let [res# (do ~@sexps)
                      res# (w/postwalk (fn [x#] (if (or (coll? x#) (string? x#) (number? x#) (keyword? x#)
                                                        (nil? x#))
                                                  x#
-                                                 [:type-of (str (type x#)) (str x#)]))
+
+                                                 (cond-> [:type-of (str (type x#)) (str x#)]
+                                                   (instance? python/Exception x#)
+                                                   (conj (with-out-str (strace/print-stack-trace x#))))))
                                       res#)]
                  res#))
 

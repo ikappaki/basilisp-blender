@@ -12,6 +12,9 @@ jobs:
   deploy:
 
     runs-on: ubuntu-latest
+    env:
+      BB_BLENDER_TEST_HOME: "~/blender"
+      BB_BLENDER_VERSION: "4.2.0"
 
     environment: release
     permissions:
@@ -30,9 +33,32 @@ jobs:
         python -m pip install --upgrade pip
         pip install poetry
     - name: Build package
-      run: poetry build && python scripts/bb_addon_create.py
+      run: poetry install && poetry build && poetry run python scripts/bb_addon_create.py
+
+    - name: Restore Blender from cache
+      id: cache-blender
+      uses: actions/cache/restore@v4
+      with:
+        path: ~/blender
+        key: ${{ runner.os }}-blender-$BB_BLENDER_VERSION
+
+    - name: Install Blender
+      if: steps.cache-blender.outputs.cache-hit != 'true'
+      run: |
+        poetry run python scripts/blender_install.py $BB_BLENDER_VERSION
+
+    - name: "Save Blender in cache"
+      if: steps.cache-blender.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: ~/blender
+        key: ${{ steps.cache-blender.outputs.cache-primary-key }}
+
+    - name: Build extension
+      run: poetry run basilisp run scripts/bb_extension_create.lpy
+
     - name: Upload release artifacts
-      run: gh release upload ${{ github.event.release.tag_name }} dist/*.{tar.gz,whl} out/nrepl_panel_addon*.py
+      run: gh release upload ${{ github.event.release.tag_name }} dist/*.{tar.gz,whl} out/nrepl_panel_addon*.py extension/*.zip
       env:
         GH_TOKEN: ${{ github.token }}
     - name: Publish package distributions to PyPI

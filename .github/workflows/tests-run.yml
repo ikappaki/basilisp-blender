@@ -15,11 +15,12 @@ jobs:
     runs-on: ${{matrix.os}}
     env:
       BB_BLENDER_TEST_HOME: "~/blender"
+      LIBGL_ALWAYS_SOFTWARE: 1
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         version: ['3.11']
-        blender: ['4.2.0']
+        blender: ['4.1.0', '4.2.0']
 
     steps:
       - uses: actions/checkout@v4
@@ -29,6 +30,8 @@ jobs:
 
       - name: Install poetry
         uses: abatilo/actions-poetry@v2
+        with:
+          poetry-version: "1.8.5"
 
       - name: Setup a local virtual environment
         run: |
@@ -69,10 +72,21 @@ jobs:
         if: "startsWith (matrix.os, 'ubuntu')"
         run: |
           sudo apt-get update -y -qq
-          sudo apt-get install -y -qq libegl1-mesa libegl1-mesa-dev
+          sudo apt-get install -y -qq libegl-mesa0 libegl1-mesa-dev
 
-      - name: Run integration tests
+      - name: Build and install extension
+        if: ${{ matrix.blender >= '4.2.0' }}
+        run: |
+          poetry build
+          poetry run basilisp run scripts/bb_extension_create.lpy --and-install
+
+
+      - name: Build and install Add-on
+        if: ${{ matrix.blender < '4.2.0' }}
         run: |
           poetry build
           poetry run python scripts/bb_package_install.py
+
+      - name: Run integration tests
+        run: |
           poetry run pytest --integration -v
