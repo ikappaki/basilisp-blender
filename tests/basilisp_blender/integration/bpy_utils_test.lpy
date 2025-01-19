@@ -109,32 +109,37 @@
           (let [{:keys [nrepl-port-file]
                  :test/keys [temp-dir]} nrepl-port-dir-other
                 path-expected (os.path/join temp-dir ".nrepl-port")]
-            (is (= path-expected nrepl-port-file) nrepl-port-dir-other))
-          )))))
+            (is (= path-expected nrepl-port-file) nrepl-port-dir-other)))))))
 
 #_(tu/pp-code (blender-nrepl-server-test))
 
 (defmacro with-blender-nrepl-server [& body]
-  "Starts a Blender process running an nREPL server with `opts`
-  and executes `body`, with the `port` symbol bound to the server's
-  port number."
-  `(let [{result#     :result
-          error#      :error
-          process#    :process
-          terminate!# :terminate!}
-         (tu/blender-eval
-          {:terminate? false}
+  "Starts a Blender process from a temp directory running an nREPL
+  server with `opts` and executes `body`, with the `port` symbol bound
+  to the server's port number."
+  `(with [tmpdir# (tempfile/TemporaryDirectory)]
+         (let [cwd# (os/getcwd)]
+           (try
+             (os/chdir tmpdir#)
+             (let [{result#     :result
+                    error#      :error
+                    process#    :process
+                    terminate!# :terminate!}
+                   (tu/blender-eval
+                    {:terminate? false}
 
-          (require '[basilisp-blender.bpy-utils :as bu])
-          (let [{host# :host port# :port :as all#}
-                (bu/nrepl-server-start {})]
-            port#))]
-     (try
-       (let [{port# :res} result#]
-         (binding [*nrepl-port* port#]
-           ~@body))
-       (finally
-         (terminate!# :with-blender-nrepl-server)))))
+                    (require '[basilisp-blender.bpy-utils :as bu])
+                    (let [{host# :host port# :port :as all#}
+                          (bu/nrepl-server-start {})]
+                      port#))]
+               (try
+                 (let [{port# :res} result#]
+                   (binding [*nrepl-port* port#]
+                     ~@body))
+                 (finally
+                   (terminate!# :with-blender-nrepl-server))))
+             (finally
+               (os/chdir cwd#))))))
 
 (deftest-ui test-with-blender-nrepl-server
   (testing "Runtime behavior"

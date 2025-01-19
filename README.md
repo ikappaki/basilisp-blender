@@ -25,21 +25,26 @@ After installation, the extension will appear as activated under the `Get Extens
 
 ## Usage
 
-### nREPL server control panel
+### nREPL Server Control Panel
 
 The library includes an nREPL server control panel accessible in Blender’s Properties editor, under the Output panel (icon resembling a printer). From here, users can:
 - Start and stop the server.
 - Configure the local interface address and port.
-- Specify your `Basilisp Project Root Directory`, where the `.nrepl-port` file will be saved for editor discovery.
+- Specify an optional `Basilisp Project Directory`.
 
-![nrepl cntrl panel output - ready](examples/nrepl-ctrl-panel-output-ready.png)
+![nrepl cntrl panel output - ready](misc/nrepl-ctrl-panel.png)
 
-![nrepl cntrl panel output - serving](examples/nrepl-ctrl-panel-output-serving.png)
+![nrepl cntrl panel output - serving](misc/nrepl-ctrl-panel-running.png)
 
-The `Basilisp Project Root Directory` is the location where your Basilisp code resides.
-It is recommended to include an empty `basilisp.edn` file in the root directory to indicate it is a Basilisp project.
+The `Basilisp Project Directory` is the location where your Basilisp code resides.
+Upon starting the server, this directory is added to `sys.path` for the duration of the nREPL session, allowing Basilisp code files in that directory to be seamlessly `require`'d . 
+The following files will also be created in the directory for convenience if they do not already exist:
 
-Example structure:
+- `basilisp.edn`: Marks the directory as a Basilisp Project for code editors.
+- `scratch.lpy`:  A Basilisp file for users to experiment with writing code.
+- `.nrepl-port`:  The port number where the nREPL server is listening. This will overwrite any existing file.
+
+A minimal Project Directory would include these files:
 
 ```
 <project root directory>
@@ -76,10 +81,11 @@ If you are using a different Editor, refer to its documentation for instructions
 
 The Editor should now connect seamlessly to the nREPL server.
 
-### Evaluating Basilisp Code
+### Pythonic Interface
 
-#### From a Code String
-To evaluate a Basilisp code string:
+#### Evaluating Basilisp Code
+
+##### From a Code String
 
 ```python
 from basilisp_blender.eval import eval_str
@@ -88,8 +94,7 @@ eval_str("(+ 1 2)")
 # => 3
 ```
 
-#### From a File
-To evaluate Basilisp code from a file:
+##### From a File
 
 ```python
 from basilisp_blender.eval import eval_file
@@ -97,7 +102,7 @@ from basilisp_blender.eval import eval_file
 eval_file("path/to/your/code.lpy")
 ```
 
-#### From Blender’s Text Editor
+##### From Blender’s Text Editor
 To evaluate Basilisp code contained in a Blender text editor block:
 
 ```python
@@ -136,9 +141,9 @@ Replace `<project-root-path>` with the path to your project's root directory.
 
 # Examples
 
-Also see the [examples](examples/) directory of this repository.
+Also see the [examples](examples/) directory.
 
-Here is an example of Basilisp code to create a torus pattern using the bpy Blender Python library:
+Here is an example of Basilisp code to create a torus pattern using the [bpy](https://docs.blender.org/api/current/index.html) Blender Python library:
 
 ```clojure
 (ns torus-pattern
@@ -192,7 +197,7 @@ Here is an example of Basilisp code to create a torus pattern using the bpy Blen
 (create-pattern {:layers-num 5})
 ```
 
-![torus pattern example img](examples/torus-pattern.png)
+![torus pattern example img](misc/torus-pattern.png)
 
 ## Manual Installation and Setup
 

@@ -80,7 +80,6 @@ jobs:
           poetry build
           poetry run basilisp run scripts/bb_extension_create.lpy --and-install
 
-
       - name: Build and install Add-on
         if: ${{ matrix.blender < '4.2.0' }}
         run: |

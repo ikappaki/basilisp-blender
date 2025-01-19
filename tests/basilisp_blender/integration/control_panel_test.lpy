@@ -1,5 +1,6 @@
 (ns tests.basilisp-blender.integration.control-panel-test
   (:import logging
+           os
            os.path
            socket
            tempfile
@@ -16,8 +17,9 @@
     (testing "ctrl creation"
       (let [result (but/with-client-eval!
                      (require '[basilisp-blender.control-panel :as p])
-
-                     ;; this var will be used throughout all other tests
+                     (import os sys)
+                     ;; these var are available for all tests in the
+                     ;; with-blender-nrepl-run session
                      (def ctrl-panel (p/nrepl-control-panel-create!))
                      (def ctrl-test (:ctrl ctrl-panel))
                      (def ctrl-destroy! (:destroy! ctrl-panel))
@@ -25,20 +27,20 @@
                      @ctrl-test)]
         (is (= {:res {:status [:ready]}} result)))
 
-      (is (= {:result {:host nil :status [:ready] :port nil :port-dir nil}}
+      (is (= {:result {:host nil :status [:ready] :port nil :project-dir nil}}
              (:res (but/with-client-eval!
                      (p/ctrl-do! ctrl-test :info-get))))))
 
     (testing "server start/stop without options"
-      (let [{:keys [res] :as ret} (but/with-client-eval!
-                                    [(p/ctrl-do! ctrl-test :server-toggle!)
-                                     (p/ctrl-do! ctrl-test :info-get)])
+      (let [{:keys [res] :as _ret} (but/with-client-eval!
+                                     [(p/ctrl-do! ctrl-test :server-toggle!)
+                                      (p/ctrl-do! ctrl-test :info-get)])
             [[toggle-state toggle-msg :as toggle] info] (map :result res)]
+
         (is (= :started toggle-state))
-        (let [{:keys [port]} info
-              cwd (os.path/abspath ".")]
+        (let [{:keys [port]} info]
           (is (= (str "nrepl://127.0.0.1:" port) toggle-msg) toggle)
-          (is (= {:host "127.0.0.1", :status [:serving], :port-dir cwd :port port} info))
+          (is (= {:host "127.0.0.1", :status [:serving], :project-dir nil :port port} info))
 
           ;; toggle -- server stop
           (let [{:keys [res] :as ret} (but/with-client-eval!
@@ -47,7 +49,7 @@
                 [[toggle-state toggle-msg :as toggle] info] (map :result res)]
             (is (= :stopped toggle-state) ret)
             (is (= (str "nrepl://127.0.0.1:" port) toggle-msg) toggle)
-            (is (= {:host nil :status [:ready] :port nil :port-dir nil} info))))))
+            (is (= {:host nil :status [:ready] :port nil :project-dir nil} info))))))
 
     (testing "server host option"
       (let [{:keys [res] :as ret} (but/with-client-eval!
@@ -66,7 +68,7 @@
                 [[toggle-state toggle-msg :as toggle] info] (map :result res)]
             (is (= :stopped toggle-state))
             (is (= (str "nrepl://0.0.0.0:" port) toggle-msg) toggle)
-            (is (= {:host nil :status [:ready] :port nil :port-dir nil} info))))))
+            (is (= {:host nil :status [:ready] :port nil :project-dir nil} info))))))
 
     (testing "server port option"
       (let [{:keys [res] :as _ret} (but/with-client-eval!
@@ -77,34 +79,49 @@
                [:type-of
                 "<class 'OverflowError'>"
                 "OverflowError('bind(): port must be 0-65535.')"])}
-             {:result {:port nil, :host nil, :status [:ready], :port-dir nil}}] res)))
+             {:result {:port nil, :host nil, :status [:ready], :project-dir nil}}] res)))
 
-    (testing "server nrepl-port-dir option"
+    (testing "Basilisp project-dir option"
       (let [{:keys [exc res] :as _ret}
             (but/with-client-eval!
-              (import tempfile)
+              (import os
+                      tempfile)
               (with [tmpdir (tempfile/TemporaryDirectory)]
                     {:actions
-                     [(p/ctrl-do! ctrl-test :server-toggle! {:nrepl-port-dir tmpdir})
+                     [{:result (doall (seq sys/path))}
+                      (p/ctrl-do! ctrl-test :server-toggle! {:project-dir tmpdir})
                       (p/ctrl-do! ctrl-test :info-get)
-                      (p/ctrl-do! ctrl-test :server-toggle!)]
+                      {:result (doall (seq sys/path))}
+                      {:result (set (os/listdir tmpdir))}
+                      (p/ctrl-do! ctrl-test :server-toggle!)
+                      {:result (doall (seq sys/path))}]
+
                      :tmpdir tmpdir}))
 
             {:keys [actions tmpdir]} res
 
-            [[toggle-state] {:keys [port-dir]} [toggle-state2]]
+            [sys-path-before [toggle-state]
+             {:keys [project-dir] :as _info} sys-path-during files-set
+             [toggle-state2] sys-path-after]
             (map :result actions)]
 
         (is (nil? exc) exc)
         (is (= :started toggle-state))
-        (is (= tmpdir port-dir) res)
-        (is (= :stopped toggle-state2))))
+        (is (= tmpdir project-dir) res)
+        (is (= :stopped toggle-state2))
+
+        (is (= #{".nrepl-port" "basilisp.edn" "scratch.lpy"} files-set))
+
+        ;; the project dir was added to the sys.path during the session
+        (is (= (conj (vec sys-path-before) project-dir) sys-path-during))
+        ;; the sys.path was restored after the session
+        (is (= sys-path-after sys-path-before))))
 
     (testing "destroying panel"
       (let [{:keys [res]} (but/with-client-eval!
-                                    [(p/ctrl-do! ctrl-test :server-toggle!)
-                                     (ctrl-destroy!)
-                                     (p/ctrl-do! ctrl-test :info-get)])
+                            [(p/ctrl-do! ctrl-test :server-toggle!)
+                             (ctrl-destroy!)
+                             (p/ctrl-do! ctrl-test :info-get)])
             [[toggle-state] _ {:keys [status] :as _info}] (map :result res)]
         (is (= :started toggle-state))
         (is (= [:ready] status) _info)))))

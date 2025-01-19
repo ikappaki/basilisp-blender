@@ -3,7 +3,7 @@
             [basilisp-blender.bpy-utils :as bu]
             [basilisp-blender.utils :as u])
   (:import bpy
-           os.path
+           os
            sys))
 
 (defn- nrepl-url
@@ -18,23 +18,63 @@
   settings."
   []
   (u/class-make* NREPLSettingsPropertyGroup [bpy.types/PropertyGroup]
-                 [^{:tag (.StringProperty bpy/props **
-                                          :name "host"
-                                          :description "The local interface address to listen on for connections"
-                                          :default "127.0.0.1")}
+                 [^{:tag (bpy.props/StringProperty
+                          **
+                          :name "host"
+                          :description "The local interface address to listen on for connections"
+                          :default "127.0.0.1")}
                   pr-host
 
-                  ^{:tag (.IntProperty bpy/props **
-                                       :name "port"
-                                       :description "The port number to listen for connections. Set to 0 to use a random available port on startup"
-                                       :default 0
-                                       :min 0)}
+                  ^{:tag (bpy.props/IntProperty
+                          **
+                          :name "port"
+                          :description "The port number to listen for connections. Set to 0 to use a random available port on startup"
+                          :default 0
+                          :min 0)}
                   pr-port
 
-                  ^{:tag (.StringProperty bpy/props **
-                                          :name ".nrepl-port dir"
-                                          :description "An optional directory path to save the .nrepl-port file for editors to use when connecting to the server. If not provided, it defaults to the current working directory")}
-                  pr-port-dir]))
+                  ^{:tag (bpy.props/StringProperty
+                          **
+                          :name "Basilisp Project Directory"
+                          :description "An optional path to a Basilisp Project Directory, which will be added to sys.path for the duration of the nREPL session, allowing Basilisp code files in that directory to be require'd . The following files will also be created in the directory if they do not already exist:
+
+- basilisp.edn: Marks the directory as a Basilisp Project for code editors.
+- scratch.lpy:  A Basilisp file for users to experiment with writing code.
+- .nrepl-port:  The port number where the nREPL server is listening. This will overwrite any existing file.")}
+                  pr-project-dir]))
+
+(defn- project-dir-prepare!
+  "Prepares the `path` directory as the Project Directory for the nREPL session by
+
+  - Adding the directory to `sys.path`.
+
+  - Creates an empty `basilisp.edn` file to mark it as a Basilisp Project.
+
+  - Creates a `scratch.lpy` for user experimentation.
+
+  If `path` does not exist or is not a directory, no action is taken.
+
+  Returns a function to remove `path` from `sys.path` for cleanup."
+  [path]
+  (binding [*out* sys/stdout]
+    (when (and path (os.path/isdir path))
+      (let [basilisp (os.path/join path "basilisp.edn")
+            scratch (os.path/join path "scratch.lpy")]
+        (when-not (os.path/exists basilisp)
+          (try
+            (spit basilisp "")
+            (catch Exception e
+              (println :project-dir-prepare-error :file basilisp (str e)))))
+        (when-not (os.path/exists scratch)
+          (try (spit scratch "(ns scratch
+  (:import bpy))")
+               (catch Exception e
+                 (println :project-dir-prepare-error :file scratch (str e)))))
+
+        (.append sys/path path)
+
+        #(when (= (aget sys/path -1) path)
+           (.pop sys/path))))))
 
 (defn- ctrl-make
   "Returns a new stateful nREPL control instance in the `:ready` state.
@@ -51,17 +91,26 @@
   "Executes `cmd` on `ctrl*` with optional options `opts` map argument,
   and returns a result map.
 
-  Supported `cmd`s are:
+  The result map can have the following keys
 
-  :info-get Returns a map of
+  :error On error, a msg of what went wrong.
+
+  :result On success, the `cmd`'s result.
+
+  Supported `cmd`s are​:
+
+  :info-get Returns a result map of
 
     :host The host address the server is listening to.
 
     :port The port the server is bound to.
 
-    :port-dir The directory where the `.nrepl-port` file was saved at.
+    :project-dir The path to the Basilisp Project Directory.
 
     :status The status of the `ctrl*`.
+
+  :project-dir-set! Sets teh Basilisp Project Directory to the `opts`
+  path. Returns the path as a result.
 
   :server-toggle! If the server status is `:ready`, it starts
   according to `opts` and sets the status to `:serving`. If the server
@@ -71,56 +120,57 @@
 
     :host The local interface address the server should listen to.
 
-    :nrepl-port-dir The directory path where the server should write
-  the `.nrepl-port` file with the port number. If not given, the
-  current working directory path is used.
+    :nrepl-project-dir An optional directory path specifying where the
+  code for the nREPL session is located. If provided, the directory
+  will be added to `sys.path` for the duration of the session. At
+  server startup, a `basilisp.edn` file and a `scratch.lpy` file will be
+  created in the directory if they do not already exist. Additionally,
+  an `.nrepl-port` file will be written, containing the port number the
+  server is listening on.
 
     :port The port number the server should bound to. A zero
   number (the default) indicates the server should bound to a random
-  available port number.
-
-  The result map can have the following keys
-
-  :error On error, a msg of what went wrong.
-
-  :result On success, the `cmd`'s result."
+  available port number."
   ([ctrl* cmd]
    (ctrl-do! ctrl* cmd nil))
   ([ctrl* cmd opts]
-   (let [{:keys [host port port-dir shut-fn status] :as ctrl} @ctrl*
+   (let [{:keys [host port project-dir shut-fn status] :as ctrl} @ctrl*
          [ctrl-new {:keys [error result] :as ret}]
          (do
            ;; (println :ctrl-do!/top :ctrl ctrl)
            (cond
              (= cmd :info-get)
-             [ctrl {:result {:port port :host host :port-dir port-dir :status status}}]
+             [ctrl {:result {:port port :host host :project-dir project-dir :status status}}]
+
+             (= cmd :project-dir-set!)
+             (let [project-dir opts]
+               [(assoc ctrl :project-dir project-dir) {:result project-dir}])
 
              (= cmd :server-toggle!)
              (condp = status
                [:ready]
-               (let [{:keys [nrepl-port-dir]
+               (let [{:keys [project-dir]
                       opts-host :host opts-port :port} opts
-                     nrepl-port-dir (when nrepl-port-dir
-                                      (let [pf (str/trim nrepl-port-dir)]
-                                        (when-not (empty? pf)
-                                          pf)))]
-                 ;; (println :ctrl-do/server-toggle! :starting :opts opts)
-                 (let [{:keys [error host nrepl-port-file port server shutdown!] :as server_}
-                       (bu/nrepl-server-start (cond-> {:host opts-host :port opts-port}
-                                                nrepl-port-dir
-                                                (assoc :nrepl-port-dir nrepl-port-dir)))]
+                     project-dir (let [pf (and project-dir (str/trim project-dir))]
+                                   (when-not (empty? pf)
+                                     pf))]
+                 (println :ctrl-do/server-toggle! :starting :opts opts)
+
+                 (let [{:keys [error host _nrepl-port-file port shutdown!] :as _server}
+                       (bu/nrepl-server-start {:host opts-host :port opts-port
+                                               :nrepl-port-dir project-dir})]
                    ;; (println :ctrl-do!/server-toggle! :server server_)
                    (if error
                      [ctrl {:error error}]
 
-                     (do
+                     (let [restore! (project-dir-prepare! project-dir)]
                        ;; (println :ctrl-do!/server-toggle! :started :port port :shut-fn shut-fn)
-                       [(cond-> {:status [:serving]
-                                 :shut-fn shutdown!
-                                 :host host
-                                 :port port}
-                          nrepl-port-file
-                          (assoc :port-dir (os.path/dirname nrepl-port-file)))
+                       [{:status [:serving]
+                         :shut-fn #(do (shutdown!)
+                                       (when restore! (restore!)))
+                         :host host
+                         :port port
+                         :project-dir project-dir}
 
                         {:result [:started (nrepl-url host port)]}]))))
 
@@ -143,6 +193,52 @@
 
      ret)))
 
+(defn- project-browse-operator-class-make
+  "Defines an operator class that opens a file browser window, allowing
+  the user to select a Basilisp Project directory, which is then set
+  in `ctrl`."
+  [ctrl]
+  (u/class-make* ProjectBrowseOperator [bpy.types/Operator]
+                 [^{:default "object.project_browse_operator"}  bl-idname
+                  ^{:default "Select"}                          bl-label
+                  ^{:default #py #{"REGISTER"}}                 bl-options
+
+                  ^{:tag (bpy.props/StringProperty
+                          **
+                          :name "Project Directory"
+                          :description "Basilisp Project Directory")}
+                  directory]
+
+                 (execute
+                  [context]
+                  (let [dir (.-directory self)
+                        props (.. context -scene -nrepl-settings-user)
+                        {:keys [result]} (ctrl-do! ctrl :project-dir-set! dir)]
+                    (set! (. props -pr-project-dir) (or result "")))
+                  #py #{"FINISHED"})
+
+                 (invoke
+                  [context _event]
+                  (-> context .-window-manager (.fileselect-add self))
+                  #py #{"RUNNING_MODAL"})))
+
+(defn- project-select-operator-class-make
+  "Defines an operator class to bring up teh
+  `object.project_browser_operator`."
+  []
+  (u/class-make* ProjectSelectOperator [bpy.types/Operator]
+                 [^{:default "object.project_select_operator"}  bl-idname
+                  ^{:default "Select Directory"}                bl-label
+                  ^{:default "Select the Basilisp Project Directory"}
+                  bl-description]
+
+                 (execute
+                  ""
+                  [_context]
+                  (binding [*out* sys/stdout]
+                    (bpy.ops.object/project_browse_operator "INVOKE_DEFAULT"))
+                  #py #{"FINISHED"})))
+
 (defn- nrepl-control-operator-class-make
   "Defines an Operator class to start/stop the server using `ctrl`."
   [ctrl]
@@ -159,13 +255,13 @@
                     (let [props (.. context -scene -nrepl-settings-user)
                           pr-host (.-pr-host props)
                           pr-port (.-pr-port props)
-                          pr-port-dir (let [pf (str/trim (.-pr-port-dir props))]
-                                        (when-not (empty? pf)
-                                          pf))
+                          pr-project-dir (let [pf (str/trim (.-pr-project-dir props))]
+                                           (when-not (empty? pf)
+                                             pf))
                           {:keys [error result]}
                           (ctrl-do! ctrl :server-toggle! {:host pr-host
                                                           :port pr-port
-                                                          :nrepl-port-dir pr-port-dir})]
+                                                          :project-dir pr-project-dir})]
                       (if error
                         (.report self #py #{"ERROR"}
                                  (str :server-op-error " " (u/error->str error)))
@@ -188,7 +284,6 @@
                   ^{:default "WINDOW"}                            bl-region-type
                   ^{:default "output"}                            bl-context]
 
-
                  (draw
                   "Draws the control panel to to toggle the server and
                    manage its settings.
@@ -204,12 +299,11 @@
                   [context]
 
                   (binding [*out* sys/stdout]
-                    (let [{:keys [host port port-dir status] :as _info}
-                          (:result (ctrl-do! ctrl :info-get nil))
+                    (let [{:keys [host port project-dir status] :as _info}
+                          (:result (ctrl-do! ctrl :info-get))
 
                           layout (.-layout self)
-                          props (.. context -scene -nrepl-settings-user)
-                          pr-port (.-pr_port props)]
+                          props (.. context -scene -nrepl-settings-user)]
                       (case status
                         [:ready]
                         (do
@@ -219,10 +313,17 @@
                           (set! (.. layout -use-property-split) true)
                           (set! (.. layout -use-property-decorate) false)
 
-                          (let [[row1 row2 row3] (repeatedly 3 #(.row layout))]
+                          (let [[row1 row2] (repeatedly 2 #(.row layout))]
                             (.prop row1 props "pr_host")
-                            (.prop row2 props "pr_port")
-                            (.prop row3 props "pr_port_dir")))
+                            (.prop row2 props "pr_port"))
+
+                          (let [split (.split layout ** :factor 0.95)
+                                col1 (.column split)
+                                col2 (.column split)]
+                            (.prop col1 props "pr_project_dir" ** :text "" :expand true)
+                            (.operator col2 "object.project_select_operator" **
+                                       :icon "FILE_FOLDER" :text "")))
+
                         [:serving]
                         (do
                           (let [row (.row layout)]
@@ -230,14 +331,15 @@
                                        :text "✋ STOP SERVER"))
                           (doseq [[k v] [["host" host]
                                          ["port" (str port)]
-                                         [".nrepl-port dir" port-dir]]]
+                                         ["Basilisp project dir" project-dir]]]
                             (let [split (.split layout ** :factor 0.4)
                                   col1 (.column split ** :align true)
                                   col2 (.column split)]
                               (set! (.-alignment col1) "RIGHT")
                               (.label col1 ** :text k)
                               (when v
-                                (.label col2 ** :text v)))))))))))
+                                (.label col2 ** :text v)))))))
+                    nil))))
 
 (defn nrepl-control-panel-create!
   "Creates the nrepl server control panel in Blender, and returns its
@@ -256,6 +358,12 @@
         settings-user
         (nrepl-settings-property-group-class-make)
 
+        project-browse
+        (project-browse-operator-class-make ctrl)
+
+        project-select
+        (project-select-operator-class-make)
+
         operator
         (nrepl-control-operator-class-make ctrl)
 
@@ -264,6 +372,10 @@
 
     (bpy.utils/register-class settings-user)
     (set! bpy.types.Scene/nrepl-settings-user (.PointerProperty bpy/props ** :type settings-user))
+
+    (bpy.utils/register-class project-browse)
+    (bpy.utils/register-class project-select)
+
     (bpy.utils/register-class operator)
     (bpy.utils/register-class panel)
 
@@ -273,7 +385,7 @@
                    (doseq [cls [settings-user operator panel]]
                      (try
                        (bpy.utils/unregister-class cls)
-                       (catch Exception e
+                       (catch Exception _e
                          nil)))
                    (delattr bpy.types/Scene "nrepl_settings_user")
                    (let [{:keys [result] :as _info} (ctrl-do! ctrl :info-get)

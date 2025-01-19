@@ -337,7 +337,7 @@
                                          vec)
                       "status" ["done"]})))
 
-(def ops
+(def ^:private ops
   "A map of operations supported by the nREPL server (as keywords) to function
   handlers for those operations."
   {:eval      handle-eval
