@@ -61,7 +61,11 @@
     :src :extension}
    "basilisp-blender-extension"
    {:url "https://github.com/ikappaki/basilisp-blender"
-    :license "https://www.gnu.org/licenses/gpl-3.0.txt"}
+    ;; workaround for GH CI issue with failing to download license
+    ;; from gnu.org.
+    :license "misc/gpl-3.0.txt"
+    ;; :license "https://www.gnu.org/licenses/gpl-3.0.txt"
+    }
    "immutables"
    {:url "https://github.com/MagicStack/immutables"
     :license "https://raw.githubusercontent.com/MagicStack/immutables/refs/heads/master/LICENSE"
@@ -183,11 +187,6 @@
     (assert (zero? retcode) retcode)
     retcode))
 
-(defn url-download [url]
-  (let [req (r/get url)]
-    (assert (= (.-status-code req) 200) url)
-    (.-text req)))
-
 (println :license-creating-at ext-license-file)
 (with [file (open ext-license-file ** :mode "w")]
       (let [bas-deps (filter (fn [[k v]] (= (:dependent v) "basilisp")) packages-info)]
@@ -209,11 +208,12 @@
                                                                2
                                                                :else
                                                                3))))]
+          (println \tab :license-adding license)
           (let [dashes (* "-" (+ 2 (count dep)))]
             (.write file (str "\n\n" dashes "\n "
                               dep " - " url
                               "\n" dashes "\n\n"
-                              (url-download license)))))))
+                              (slurp license)))))))
 (cmd-exec "diff" ext-license-file "LICENSE_EXTENSION")
 
 (println :init-creating-at ext-manifest-file)
