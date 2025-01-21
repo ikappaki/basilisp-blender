@@ -11,17 +11,23 @@ This library provides functions to evaluate Basilisp code from Blender's Python 
 ## Installation
 
 For Blender `>= 4.2.0`, download the `basilisp_blender_extension-<version>.zip` extension file from the [releases](https://github.com/ikappaki/basilisp-blender/releases) page.
-Install in Blender by navigated to:
+Install in Blender by navigating to:
 
 `Edit > Preferences > Get Extensions > Install From Disk...`
 
-Alternatively, you can also install it via the command line:
+Then, enable it by ticking the checkbox under:
+
+`Edit > Preferences > Add-ons > ☐ Basilisp Blender Extension`
+
+Alternatively, you can also install and enable the extension (`-e`) via the command line:
 
 ```shell
-$ blender[.exe] --command extension install-file basilisp_blender_extension-<version>.zip -r user_default -e
+$ blender --command extension install-file basilisp_blender_extension-<version>.zip -r user_default -e
 ```
 
 After installation, the extension will appear as activated under the `Get Extensions` tab in Preferences.
+
+For Blender versions `< 4.2.0`, refer to  [Manual Installation and Setup](#Manual Installation and Setup).
 
 ## Usage
 

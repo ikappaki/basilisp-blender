@@ -103,13 +103,14 @@
 (def manifest          {:schema_version "1.0.0"
                         :id "basilisp_blender_extension"
                         :name "Basilisp Blender Extension"
-                        :tagline "Basilisp, a Clojure compatible Lisp running on the Python VM"
-                        :maintainer "ikappaki"
+                        :tagline "Interactive Basilisp coding in Blender"
+                        :maintainer "Ioannis Kappas"
                         :type "add-on"
                         :website "https://github.com/ikappaki/basilisp-blender"
                         :blender_version_min "4.2.0"
                         :license ["SPDX:GPL-3.0-or-later"]
-                        :platforms ["windows-x64", "macos-arm64", "linux-x64"]})
+                        ;; :platforms ["windows-x64", "macos-arm64", "linux-x64"]
+                        })
 
 (def init-file-content (->> (slurp "src/dev/nrepl_panel_addon.py")
                             (str/split-lines)
