@@ -27,7 +27,7 @@ $ blender --command extension install-file basilisp_blender_extension-<version>.
 
 After installation, the extension will appear as activated under the `Get Extensions` tab in Preferences.
 
-For Blender versions `< 4.2.0`, refer to  [Manual Installation and Setup](#Manual Installation and Setup).
+For Blender versions `< 4.2.0`, refer to  [Manual Installation and Setup](#Manual-Installation-and-Setup).
 
 ## Usage
 
