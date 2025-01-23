@@ -1,7 +1,8 @@
 (ns basilisp-blender.control-panel
   (:require [clojure.string :as str]
             [basilisp-blender.bpy-utils :as bu]
-            [basilisp-blender.utils :as u])
+            [basilisp-blender.utils :as u]
+            [basilisp-nrepl-async.utils :as au])
   (:import bpy
            os
            sys))
@@ -183,7 +184,7 @@
 
                ;; else
                [{:status [:ready]}
-                {:error (u/error-make :state-invalid status
+                {:error (au/error-make :state-invalid status
                                       :ctrl ctrl)}])
 
              :else
@@ -264,7 +265,7 @@
                                                           :project-dir pr-project-dir})]
                       (if error
                         (.report self #py #{"ERROR"}
-                                 (str :server-op-error " " (u/error->str error)))
+                                 (str :server-op-error " " (au/error->str error)))
 
                         (.report self #py #{"INFO"}
                                  (str result)))))

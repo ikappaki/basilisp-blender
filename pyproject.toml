@@ -14,6 +14,7 @@ Homepage = "https://github.com/ikappaki/basilisp-blender"
 [tool.poetry.dependencies]
 python = "^3.9"
 basilisp = ">=0.3.6"
+basilisp-nrepl-async = ">=0.1.1"
 
 [tool.poetry.group.test.dependencies]
 pytest = "^8.3.1"

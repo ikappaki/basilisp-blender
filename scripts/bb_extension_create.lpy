@@ -66,6 +66,10 @@
     :license "misc/gpl-3.0.txt"
     ;; :license "https://www.gnu.org/licenses/gpl-3.0.txt"
     }
+   "basilisp-nrepl-async"
+   {:url "https://github.com/ikappaki/basilisp-nrepl-async"
+    :license "https://raw.githubusercontent.com/ikappaki/basilisp-nrepl-async/refs/heads/main/LICENSE"
+    :source :poetry}
    "immutables"
    {:url "https://github.com/MagicStack/immutables"
     :license "https://raw.githubusercontent.com/MagicStack/immutables/refs/heads/master/LICENSE"
@@ -193,6 +197,7 @@
         (.write file (str "The extension is distributed under GPLv3, with bundled wheel dependencies maintaining their original licences as specified\n\n"
                           (str/join "\n" (concat ["- basilisp-blender-extension"
                                               "  - basilisp-blender"
+                                              "  - basilisp-nrepl-async"
                                               "  - basilisp"]
                                              (for [[dep {:keys [url]}] (sort-by key bas-deps)]
                                                (str "    - " dep))))))
@@ -204,10 +209,12 @@
                                                                0
                                                                (= k "basilisp-blender")
                                                                1
-                                                               (= k "basilisp")
+                                                               (= k "basilisp-nrepl-async")
                                                                2
+                                                               (= k "basilisp")
+                                                               3
                                                                :else
-                                                               3))))]
+                                                               4))))]
           (println \tab :license-adding license)
           (let [dashes (* "-" (+ 2 (count dep)))]
             (.write file (str "\n\n" dashes "\n "
