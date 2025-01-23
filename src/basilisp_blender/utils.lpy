@@ -1,9 +1,7 @@
 (ns basilisp-blender.utils
-  (:require [basilisp.set :as set]
-            [basilisp.stacktrace :as st]
-            [basilisp.string :as str]))
+  (:require [basilisp.string :as str]))
 
-(defmacro class-make* [class-name class-and-interfaces fields & fns]
+(defmacro class-make*
   "Creates and returns a Python class with the given ``class-name``,
   inheriting from the list of ``class-and-interfaces``. The class is
   defined with the given ``fields`` and ``fns`` methods.
@@ -11,9 +9,9 @@
   Each field in ``fields`` must include at least one of the following
   metadata keys, otherwise, an error will be signaled:
 
-  :default The default value for the field.
+  `:default` The default value for the field.
 
-  :tag A type annotation for the field.
+  `:tag` A type annotation for the field.
 
   Within the ``fns`` methods, field names can be accessed directly as
   functions by prefixing them with `-`, e.g., `(-field)`.
@@ -23,13 +21,14 @@
 
   (method-name1 docstring-maybe [args...] body)
 
-  Inside the method body, the self symbol is available to refer to the
-  instance of the class.
+  Inside the method body, the `self` symbol is available to refer to
+  the instance of the class.
 
-  Methods can accept Python keyword arguments by specifying
-  the :kwargs option in the method's metadata. For example:
+  Methods can accept Python keyword arguments by specifying the
+  `:kwargs` option in the method's metadata. For example:
 
   ^{:kwargs :collect} (method-name [args... {:as kwargs}])."
+  [class-name class-and-interfaces fields & fns]
   (let [;; The idea here is to create let bindings to the fields and
         ;; functions required to implement the interfaces or new
         ;; methods, and associate these bindigns to method names in

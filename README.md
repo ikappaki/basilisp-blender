@@ -81,6 +81,10 @@ If you are using a different Editor, refer to its documentation for instructions
 
 The Editor should now connect seamlessly to the nREPL server.
 
+### Basilisp Interface
+
+Refer to the `basilisp-blender` [API.md](API.md), and the [Blender API](https://docs.blender.org/api/current/index.html) for  for details on [interoperability with Python](https://basilisp.readthedocs.io/en/latest/pyinterop.html).
+
 ### Pythonic Interface
 
 #### Evaluating Basilisp Code
