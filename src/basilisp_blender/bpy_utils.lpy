@@ -1,7 +1,7 @@
 (ns basilisp-blender.bpy-utils
   (:require [basilisp.string :as str]
-            [basilisp-blender.nrepl-server :as ns]
-            [basilisp-blender.utils :as u])
+            [basilisp-nrepl-async.nrepl-server :as nr]
+            [basilisp-nrepl-async.utils :as u])
   (:import atexit
            bpy
            os.path
@@ -51,7 +51,7 @@
         {:error (u/error-make [:nrepl-server-start :nrepl-port-dir-not-a-dir nrepl-port-dir])}
 
         (let [{:keys [error work-fn shutdown-fn] :as ret}
-              (ns/start-server! {:async? true
+              (nr/server-start! {:async? true
                                  :host host
                                  :port port
                                  :nrepl-port-file (os.path/join nrepl-port-dir ".nrepl-port")})]
