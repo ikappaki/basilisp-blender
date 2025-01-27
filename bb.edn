@@ -1,0 +1,8 @@
+{ :tasks
+ {quickdoc {:doc "Invoke quickdoc"
+            :extra-deps {io.github.borkdude/quickdoc {:git/sha "7e41f33d98e2ef697dd9ecdff8e84b779141c7a6"}}
+            :task (exec 'quickdoc.api/quickdoc)
+            :exec-args {:git/branch "master"
+                        :github/repo "https://github.com/ikappaki/basilisp-blender"
+                        :source-paths ["src/basilisp_blender/utils.lpy"
+                                       "src/basilisp_blender/bpy_utils.lpy"]}}}}

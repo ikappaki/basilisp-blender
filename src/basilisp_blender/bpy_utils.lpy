@@ -9,32 +9,36 @@
 
 (defn nrepl-server-start
   "Starts the nrepl-server in async mode according to `opts`, using a
-  bpy timer to schedule any pending client work every 200ms.
+  bpy timer to schedule any pending client work.
 
   `opts` is a map that can have the following keys
 
-  :host The interface address the server should be bound to. It
+  `:host` The interface address the server should be bound to. It
   defaults to 127.0.0.1 if not given or empty.
 
-  :port The port number the server should listen to. It defaults to 0,
-  which indicates a random available port number.
+  `:interval-sec` The interval in seconds for executing pending
+  work. Defaults to 200ms.
 
-  :nrepl-port-dir The directory where the `.nrepl-port` file should be
-  created at. It defaults to the current working directory if not
+  `:port` The port number the server should listen to. It defaults to
+  0, which indicates a random available port number.
+
+  `:nrepl-port-dir` The directory where the `.nrepl-port` file should
+  be created at. It defaults to the current working directory if not
   given or empty.
 
   It returns a map with the following keys
 
-  :error An error message in case the server could not be started
+  `:error` An error message in case the server could not be started.
 
-  :host The address the server is bound to.
+  `:host` The address the server is bound to.
 
-  :nrepl-port-file The path to the `.nrepl-port` file with the port
+  `:nrepl-port-file` The path to the `.nrepl-port` file with the port
   number the server is listening to.
 
-  :port The port the server is listening to.
+  `:port` The port the server is listening to.
 
-  :shutdown! A function to shutdown the server and stop the bpy timer."
+  `:shutdown!` A function to shutdown the server and stop the bpy
+  timer."
   [{:keys [host port nrepl-port-dir interval-sec] :as opts
     :or {port 0
          interval-sec 0.2}}]
