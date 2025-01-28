@@ -1,15 +1,14 @@
 [tool.poetry]
 name = "basilisp-blender"
-version = "0.3.0"
+version = "0.4.0"
 description = ""
 authors = ["ikappaki"]
+homepage = "https://github.com/ikappaki/basilisp-blender"
 readme = "README.md"
 packages = [
     { include = "basilisp_blender", from = "src" },
 ]
 
-[project.urls]
-Homepage = "https://github.com/ikappaki/basilisp-blender"
 
 [tool.poetry.dependencies]
 python = "^3.9"

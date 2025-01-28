@@ -11,19 +11,29 @@ This library provides functions to evaluate Basilisp code from Blender's Python 
 ## Installation
 
 For Blender `>= 4.2.0`, download the `basilisp_blender_extension-<version>.zip` extension file from the [releases](https://github.com/ikappaki/basilisp-blender/releases) page.
-Install in Blender by navigated to:
+Install in Blender by navigating to:
 
 `Edit > Preferences > Get Extensions > Install From Disk...`
 
-Alternatively, you can also install it via the command line:
+Then, enable it by ticking the checkbox under:
+
+`Edit > Preferences > Add-ons > ☐ Basilisp Blender Extension`
+
+Alternatively, you can also install and enable the extension (`-e`) via the command line:
 
 ```shell
-$ blender[.exe] --command extension install-file basilisp_blender_extension-<version>.zip -r user_default -e
+$ blender --command extension install-file basilisp_blender_extension-<version>.zip -r user_default -e
 ```
 
 After installation, the extension will appear as activated under the `Get Extensions` tab in Preferences.
 
+For Blender versions `< 4.2.0`, refer to  [Manual Installation and Setup](#Manual-Installation-and-Setup).
+
 ## Usage
+
+### Basilisp Interface
+
+Refer to the `basilisp-blender` [API.md](API.md), and the [Blender API](https://docs.blender.org/api/current/index.html) for  for details on [interoperability with Python](https://basilisp.readthedocs.io/en/latest/pyinterop.html).
 
 ### nREPL Server Control Panel
 
@@ -80,10 +90,6 @@ If you are using a different Editor, refer to its documentation for instructions
 3. The editor will automatically find the port using `.nrepl-port`.
 
 The Editor should now connect seamlessly to the nREPL server.
-
-### Basilisp Interface
-
-Refer to the `basilisp-blender` [API.md](API.md), and the [Blender API](https://docs.blender.org/api/current/index.html) for  for details on [interoperability with Python](https://basilisp.readthedocs.io/en/latest/pyinterop.html).
 
 ### Pythonic Interface
 
@@ -274,11 +280,11 @@ This package uses the [Poetry tool](https://python-poetry.org/docs/) for managin
 You can run tests using the following command:
 
 ```bash
-$ poetry run pytest 
+$ poetry run basilisp test
 ```
 ### Integration testing
 
-To run integration tests, set the `$BB_BLENDER_TEST_HOME` environment variable to the root directory of the Blender installation where the development package is installed. See next section on how to facilitate the installation.
+To run integration tests, set the `$BB_BLENDER_TEST_HOME` environment variable to the root directory of the Blender installation where the development package is installed. See [Installing Blender and the Development Package](Installing-Blender-and-the-Development-Package) on how to facilitate the installation.
 
 ```bash
 $ export BB_BLENDER_TEST_HOME="~/blender420"
@@ -288,7 +294,7 @@ $ export BB_BLENDER_TEST_HOME="~/blender420"
 Then run the integration tests with
 
 ```bash
-$ poetry run pytest --integration -v
+$ poetry run basilisp test --integration -v
 ```
 
 ### Generating the extension
@@ -328,7 +334,7 @@ To enable the control panel, download the latest `nrepl_panel_addon_<version>.py
 
 The add-on should appear in list--be sure to check its box to activate it.
 
-![nrepl cntrl panel addon](examples/blender-nrepl-addon-install.png)
+![nrepl cntrl panel addon](misc/blender-nrepl-addon-install.png)
 
 
 # License
@@ -340,7 +346,3 @@ This project is licensed under the Eclipse Public License 2.0. See the [LICENSE]
 The extension is licensed under the GNU General Public License v3.0.
 
 See the [LICENSE_EXTENSION](LICENSE_EXTENSION) file for details.
-
-# Acknowledgments
-
-The nREPL server is a spin-off of [Basilisp](https://github.com/basilisp-lang/basilisp)'s `basilisp.contrib.nrepl-server`.
