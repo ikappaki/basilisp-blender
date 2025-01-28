@@ -346,7 +346,3 @@ This project is licensed under the Eclipse Public License 2.0. See the [LICENSE]
 The extension is licensed under the GNU General Public License v3.0.
 
 See the [LICENSE_EXTENSION](LICENSE_EXTENSION) file for details.
-
-# Acknowledgments
-
-The nREPL server is a spin-off of [Basilisp](https://github.com/basilisp-lang/basilisp)'s `basilisp.contrib.nrepl-server`.
