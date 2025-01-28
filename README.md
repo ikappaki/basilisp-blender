@@ -334,7 +334,7 @@ To enable the control panel, download the latest `nrepl_panel_addon_<version>.py
 
 The add-on should appear in list--be sure to check its box to activate it.
 
-![nrepl cntrl panel addon](examples/blender-nrepl-addon-install.png)
+![nrepl cntrl panel addon](misc/blender-nrepl-addon-install.png)
 
 
 # License
