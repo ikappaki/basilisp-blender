@@ -136,7 +136,6 @@ If not provided, the server will bind to a random local port.
 It will also creates an `.nrepl-port` file in the current working directory containing the port number it bound to.
 
 The return value is a function that you can call without arguments to shut down the server.
-Note that all nREPL client sessions must be closed before this function can succesfullyl shutdown the server.
 
 For a more convenient setup, you can specify to output `.nrepl-port` file to your Basilisp's project's root directory.
 This allows some Clojure editor extensions (such as [CIDER](https://docs.cider.mx/cider/index.html) or [Calva](https://calva.io/)) to automatically detect the port when `connect`'ing to the server:
@@ -261,7 +260,7 @@ Blender scripting [is not hread safe](https://docs.blender.org/api/current/info_
 As a result, the nREPL server cannot be started into a background thread and still expect calling `bpy` functions to work without corrupting its state.
 
 To work around this limitation, the nREPL server is started in a thread, but client requests are differed into a queue that will be executed later by a `bpy` custom timer function. 
-The function is run in the main Blender loop at intervals of 0.1 seconds, avoiding parallel operations that could affect Blender's state.
+The function is run in the main Blender loop at regular intervals, avoiding parallel operations that could affect Blender's state.
 
 If necessary, you can adjust this interval to better suit your needs by passing the `interval_sec` argument to the `server_start` function:
 
