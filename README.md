@@ -31,6 +31,10 @@ For Blender versions `< 4.2.0`, refer to  [Manual Installation and Setup](#Manua
 
 ## Usage
 
+### Basilisp Interface
+
+Refer to the `basilisp-blender` [API.md](API.md), and the [Blender API](https://docs.blender.org/api/current/index.html) for  for details on [interoperability with Python](https://basilisp.readthedocs.io/en/latest/pyinterop.html).
+
 ### nREPL Server Control Panel
 
 The library includes an nREPL server control panel accessible in Blender’s Properties editor, under the Output panel (icon resembling a printer). From here, users can:
@@ -86,10 +90,6 @@ If you are using a different Editor, refer to its documentation for instructions
 3. The editor will automatically find the port using `.nrepl-port`.
 
 The Editor should now connect seamlessly to the nREPL server.
-
-### Basilisp Interface
-
-Refer to the `basilisp-blender` [API.md](API.md), and the [Blender API](https://docs.blender.org/api/current/index.html) for  for details on [interoperability with Python](https://basilisp.readthedocs.io/en/latest/pyinterop.html).
 
 ### Pythonic Interface
 
@@ -280,11 +280,11 @@ This package uses the [Poetry tool](https://python-poetry.org/docs/) for managin
 You can run tests using the following command:
 
 ```bash
-$ poetry run pytest 
+$ poetry run basilisp test
 ```
 ### Integration testing
 
-To run integration tests, set the `$BB_BLENDER_TEST_HOME` environment variable to the root directory of the Blender installation where the development package is installed. See next section on how to facilitate the installation.
+To run integration tests, set the `$BB_BLENDER_TEST_HOME` environment variable to the root directory of the Blender installation where the development package is installed. See [Installing Blender and the Development Package](Installing-Blender-and-the-Development-Package) on how to facilitate the installation.
 
 ```bash
 $ export BB_BLENDER_TEST_HOME="~/blender420"
@@ -294,7 +294,7 @@ $ export BB_BLENDER_TEST_HOME="~/blender420"
 Then run the integration tests with
 
 ```bash
-$ poetry run pytest --integration -v
+$ poetry run basilisp test --integration -v
 ```
 
 ### Generating the extension

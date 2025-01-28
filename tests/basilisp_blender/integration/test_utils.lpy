@@ -353,7 +353,7 @@ finally:
             (+ 1 2))]
 
       (is (nil? terminate!))
-      (is (str/ends-with? status "[:lpy-begin][:lpy-end][:py-end]") status)
+      (is (str/ends-with? status "[:lpy-end][:py-end]") status)
       (is (= {:res 3 :outstr "" :errstr ""} result))))
 
   (testing "background"
