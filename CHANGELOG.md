@@ -1,5 +1,7 @@
 # Changelog
 
+## Unreleased
+
 ## 0.4.0
 
 - Package as a Blender Extension (#6).
