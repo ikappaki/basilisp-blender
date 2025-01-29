@@ -4,7 +4,7 @@
 
 ## 0.4.0
 
-- Package as a Blender Extension (#6).
+- Packaged library as a Blender Extension (#6).
 - Enhanced the nREPL Control Panel with a directory browser for selecting the Basilisp Project Directory (#7).
 - Increased the minimum Basilisp version to 0.3.6 (#7).
 - Replaced the internal nREPL server with the basilisp-nrepl-async package (#9).
