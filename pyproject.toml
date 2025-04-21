@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "basilisp-blender"
-version = "0.4.0"
+version = "0.4.1b0"
 description = ""
 authors = ["ikappaki"]
 homepage = "https://github.com/ikappaki/basilisp-blender"
@@ -12,7 +12,7 @@ packages = [
 
 [tool.poetry.dependencies]
 python = "^3.9"
-basilisp = ">=0.3.6"
+basilisp = ">=0.3.8"
 basilisp-nrepl-async = ">=0.1.1"
 
 [tool.poetry.group.test.dependencies]
