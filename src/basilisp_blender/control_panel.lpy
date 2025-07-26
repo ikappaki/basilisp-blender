@@ -37,7 +37,7 @@
                   ^{:tag (bpy.props/StringProperty
                           **
                           :name "Basilisp Project Directory"
-                          :description "An optional path to a Basilisp Project Directory, which will be added to sys.path for the duration of the nREPL session, allowing Basilisp code files in that directory to be require'd . The following files will also be created in the directory if they do not already exist:
+                          :description "An optional path to a Basilisp Project Directory, which will be added to sys.path for the duration of the nREPL session, allowing Basilisp code files in that directory to be require'd . The current working directory will also be changes to this path for the session. The following files will also be created in the directory if they do not already exist:
 
 - basilisp.edn: Marks the directory as a Basilisp Project for code editors.
 - scratch.lpy:  A Basilisp file for users to experiment with writing code.
@@ -74,8 +74,11 @@
 
         (.append sys/path path)
 
-        #(when (= (aget sys/path -1) path)
-           (.pop sys/path))))))
+        (let [cwd (os/getcwd)]
+          (os/chdir path)
+          #(when (= (aget sys/path -1) path)
+             (.pop sys/path)
+             (os/chdir cwd)))))))
 
 (defn- ctrl-make
   "Returns a new stateful nREPL control instance in the `:ready` state.
