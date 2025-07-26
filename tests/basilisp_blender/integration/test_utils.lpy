@@ -133,13 +133,16 @@
                       strerr# (~'.getvalue serr#)
                       ;; this should make the whole result round trip
                       ;; edn/write/read string.
-                      res# (w/postwalk (fn [x] (if (or (coll? x) (string? x) (number? x) (keyword? x)
-                                                       (nil? x))
+                      res# (w/postwalk (fn [x] (cond
+                                                 (or (coll? x) (string? x) (number? x) (keyword? x)
+                                                     (nil? x))
                                                  x
 
-                                                 (cond-> [:type-of (str (type x)) (str x)]
-                                                   (instance? python/Exception x)
-                                                   (conj (with-out-str (strace/print-stack-trace x))))))
+                                                 (instance? python/Exception x)
+                                                 [(repr x) (with-out-str (strace/print-stack-trace x))]
+
+                                                 :else
+                                                 [:type-of (str (type x)) (str x)]))
                                        res#)
                       ;; this shouldn't error because of the walk
                       ;; above.
@@ -149,7 +152,7 @@
                   (~'edn/write-string (cond-> {:outstr strout#
                                                :errstr strerr#}
                                         exc#
-                                        (assoc :exc (str exc#))
+                                        (assoc :exc (repr exc#))
 
                                         err#
                                         (assoc :error err#)
@@ -207,7 +210,7 @@
       (let [result (read-result (test-fn '([1 (python/Exception "an exc")])))]
         (is (= {:errstr "",
                 :res
-                [1 [:type-of "<class 'Exception'>" "Exception('an exc')" "Exception: an exc\n"]],
+                [1 ["Exception('an exc')" "Exception: an exc\n"]],
                 :outstr ""}
                result)))
 
