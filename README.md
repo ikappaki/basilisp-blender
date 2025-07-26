@@ -47,9 +47,12 @@ The library includes an nREPL server control panel accessible in Blender’s Pro
 ![nrepl cntrl panel output - serving](misc/nrepl-ctrl-panel-running.png)
 
 The `Basilisp Project Directory` is the location where your Basilisp code resides.
-Upon starting the server, this directory is added to `sys.path` for the duration of the nREPL session, allowing Basilisp code files in that directory to be seamlessly `require`'d . 
-The following files will also be created in the directory for convenience if they do not already exist:
 
+When the server starts, this directory is:
+- Set as the current working directory for the duration of the nREPL session.
+- Added to `sys.path`, allowing Basilisp code files within it to be seamlessly require'd.
+
+Additionaly, the following files will also be created in the directory for convenience if they do not already exist:
 - `basilisp.edn`: Marks the directory as a Basilisp Project for code editors.
 - `scratch.lpy`:  A Basilisp file for users to experiment with writing code.
 - `.nrepl-port`:  The port number where the nREPL server is listening. This will overwrite any existing file.

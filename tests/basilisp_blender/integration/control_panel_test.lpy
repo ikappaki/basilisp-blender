@@ -89,20 +89,23 @@
               (with [tmpdir (tempfile/TemporaryDirectory)]
                     {:actions
                      [{:result (doall (seq sys/path))}
+                      {:result (os/getcwd)}
                       (p/ctrl-do! ctrl-test :server-toggle! {:project-dir tmpdir})
                       (p/ctrl-do! ctrl-test :info-get)
                       {:result (doall (seq sys/path))}
+                      {:result (os/getcwd)}
                       {:result (set (os/listdir tmpdir))}
                       (p/ctrl-do! ctrl-test :server-toggle!)
-                      {:result (doall (seq sys/path))}]
+                      {:result (doall (seq sys/path))}
+                      {:result (os/getcwd)}]
 
                      :tmpdir tmpdir}))
 
             {:keys [actions tmpdir]} res
 
-            [sys-path-before [toggle-state]
-             {:keys [project-dir] :as _info} sys-path-during files-set
-             [toggle-state2] sys-path-after]
+            [sys-path-before cwd-before [toggle-state]
+             {:keys [project-dir] :as _info} sys-path-during cwd-during files-set
+             [toggle-state2] sys-path-after cwd-after]
             (map :result actions)]
 
         (is (nil? exc) exc)
@@ -115,7 +118,12 @@
         ;; the project dir was added to the sys.path during the session
         (is (= (conj (vec sys-path-before) project-dir) sys-path-during))
         ;; the sys.path was restored after the session
-        (is (= sys-path-after sys-path-before))))
+        (is (= sys-path-after sys-path-before))
+        ;; the CWD was changed during the session
+        (is (not= cwd-before cwd-during))
+        (is (= cwd-during tmpdir))
+        ;; the CWD was restored after the session
+        (is (= cwd-before cwd-after))))
 
     (testing "destroying panel"
       (let [{:keys [res]} (but/with-client-eval!
