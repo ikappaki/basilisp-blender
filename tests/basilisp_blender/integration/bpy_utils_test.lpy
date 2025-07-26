@@ -31,7 +31,7 @@
            `(->> (try
                    ~@body
                    (catch python/Exception e#
-                     (str e#)))
+                     (repr e#)))
                  (swap! ~results* assoc ~key)))
 
          (let [results* (atom {})]
@@ -96,11 +96,10 @@
             (is (= "0.0.0.0" host)))
 
           (let [{:keys [error]} nrepl-port
-                [server-make-error [type-of overflow val]] error]
+                [server-make-error [val tback]] error]
             (is (= :server-make-error server-make-error))
-            (is (= :type-of type-of))
-            (is (= overflow "<class 'OverflowError'>"))
-            (is (string? val)))
+            (is (str/starts-with? val "OverflowError"))
+            (is (string? tback)))
 
           (let [{:keys [nrepl-port-file]} nrepl-port-dir
                 path-expected (os.path/abspath (os.path/join "." ".nrepl-port"))]
@@ -161,7 +160,7 @@
       (with-blender-nrepl-server
         (throw (Exception. "Test exception")))
       (catch Exception e
-        (is (= "Exception('Test exception')" (str e)))))))
+        (is (= "Exception('Test exception')" (repr e)))))))
 
 #_(test-with-blender-nrepl-server)
 
