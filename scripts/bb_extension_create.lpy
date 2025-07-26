@@ -77,7 +77,7 @@
     :source :poetry}
    "prompt-toolkit"
    {:url "https://github.com/prompt-toolkit/python-prompt-toolkit"
-    :license "https://raw.githubusercontent.com/prompt-toolkit/python-prompt-toolkit/refs/heads/master/LICENSE"
+    :license "https://raw.githubusercontent.com/prompt-toolkit/python-prompt-toolkit/refs/heads/main/LICENSE"
     :dependent "basilisp"
     :source :poetry}
    "pyrsistent"
@@ -170,7 +170,7 @@
               (.write file wheel))))))
 
 (def wheels (map #(str "wheels/" (.-name %))
-                 (seq (os/scandir ext-wheels-dir))))
+                 (iterator-seq (os/scandir ext-wheels-dir))))
 (assert (pos? (count wheels)))
 
 (println :manifest-creating-at ext-manifest-file)

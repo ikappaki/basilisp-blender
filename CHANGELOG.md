@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Increased the minimum Basilsp version to 0.4.0 (#13)
+
 ## 0.4.0
 
 - Packaged library as a Blender Extension (#6).
