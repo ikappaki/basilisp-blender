@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-- Increased the minimum Basilsp version to 0.4.0 (#13)
+- Increased the minimum Basilsp version to 0.4.0 (#13).
+- Control Panel now starts the nREPL server with the working directory set to the project directory (#12).
 
 ## 0.4.0
 
