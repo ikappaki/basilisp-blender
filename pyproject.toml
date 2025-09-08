@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "basilisp-blender"
-version = "0.4.2"
+version = "0.5.0"
 description = ""
 authors = ["ikappaki"]
 homepage = "https://github.com/ikappaki/basilisp-blender"
