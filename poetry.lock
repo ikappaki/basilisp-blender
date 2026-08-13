@@ -21,13 +21,13 @@ tests-mypy = ["mypy (>=1.11.1)", "pytest-mypy-plugins"]
 
 [[package]]
 name = "basilisp"
-version = "0.4.0"
-description = "A Clojure-like lisp written for Python"
+version = "0.5.1"
+description = "A Clojure-compatible(-ish) Lisp dialect hosted on Python 3 with seamless Python interop."
 optional = false
-python-versions = "<4.0,>=3.9"
+python-versions = ">=3.10"
 files = [
-    {file = "basilisp-0.4.0-py3-none-any.whl", hash = "sha256:1bb1aceb6aa93c9f222017e337844138afafeb1d24e0e4f391769d18d01d1d1a"},
-    {file = "basilisp-0.4.0.tar.gz", hash = "sha256:fbd5330d1979d30a502f53f2caa8c94b9d4698200fb0e19551ac0379080ac278"},
+    {file = "basilisp-0.5.1-py3-none-any.whl", hash = "sha256:beaed768776c45b9b63042bcb5f5632db13746d7c5df1ae72d600d0095ed334d"},
+    {file = "basilisp-0.5.1.tar.gz", hash = "sha256:bcf7dde97ca4a42b4e287e73bc330908a61b61bf90b2e7c061d9524adaa603d7"},
 ]
 
 [package.dependencies]
@@ -675,5 +675,5 @@ files = [
 
 [metadata]
 lock-version = "2.0"
-python-versions = "^3.9"
-content-hash = "0067178330c77281e91bb85e0b51248cb428a5a0eec14e687dd6dd8ee0201845"
+python-versions = "^3.10"
+content-hash = "2028c5768d16f1d1b55a9292fecc44cb5685724d161c89a7c9244c16cc9152fe"

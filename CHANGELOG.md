@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Increased the minimum Basilsp version to 0.5.1 (avoids hitting basilisp-lang/basilisp#1302).
+
 ## 0.5.0
 
 - Increased the minimum Basilsp version to 0.4.0 (#13).

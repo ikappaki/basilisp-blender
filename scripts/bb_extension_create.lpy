@@ -128,7 +128,7 @@
 (def project-deps     (-> (proc/exec  "poetry" "show" "--only" "main")
                           str/trim
                           (str/split "\n")
-                          (->> (map #(take 2 (str/split % #" +" 3)))
+                          (->> (map #(vec (take 2 (str/split % #" +" 3))))
                                (into {}))))
 (assert (= (set (keys project-deps)) (set deps-expected)))
 
